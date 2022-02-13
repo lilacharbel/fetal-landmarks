@@ -291,8 +291,10 @@ class cropByBBox(object):
 
         #Slice
         bbox_slice = ( slice(*bbox_z), slice(*bbox_x), slice(*bbox_y))
+        bbox_slice_maps = ( slice(*[0, 2]), slice(*bbox_x), slice(*bbox_y))
+
         img_out = img[bbox_slice]
-        output_maps_out = output_maps[bbox_slice]
+        output_maps_out = output_maps[bbox_slice_maps]
 
         return {'image':img_out, 'output_maps':output_maps_out}
 

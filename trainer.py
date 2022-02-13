@@ -116,8 +116,9 @@ def create_dataloaders(cuda, batch_size, db_params, data):
 
     #It is not going to be elegant.... special augmentation for test
     test_ds.dataset = copy.copy(dataset)
-    test_ds.dataset.transform = transforms.Compose([ 
-                                                
+    test_ds.dataset.transform = transforms.Compose([
+
+                                            tfs.CreateGaussianTargets(sigma=1., measure_names="Measure_BBD"),
                                             tfs.cropByBBox(min_upcrop=None, max_upcrop=None),
                                             tfs.PadZ(data['context']),
                                             tfs.Rescale((224,224)),
