@@ -115,8 +115,8 @@ class CreateGaussianTargets(object):
     @all_except(tag="output_maps")
     def __call__(self, sample):
 
-        (size_x, size_y) = np.shape(sample["image"]) #TODO:seg_image / image
-        imgs = np.zeros((2, size_x, size_y))
+        img_size = np.shape(sample["image"][0])
+        imgs = np.zeros((2, img_size[0],img_size[1]))
 
         x1,x2,y1,y2 = (sample[a] for a in self.measure_names)
         pt1 = [y1,x1]
