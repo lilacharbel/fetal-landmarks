@@ -92,9 +92,9 @@ class Rescale(object):
         new_h, new_w = int(new_h), int(new_w)
 
         img = ndimage.zoom(image, (1, new_h/h, new_w/w)) #TODO:support ND
-        output_maps = ndimage.zoom(output_maps, (1, new_h/h, new_w/w))
+        output_maps_out = ndimage.zoom(output_maps, (1, new_h/h, new_w/w))
 
-        return {'image':image, 'output_maps':output_maps}
+        return {'image':img, 'output_maps':output_maps_out}
 
 class PadZ(object):
     def __init__(self, pad):
@@ -108,7 +108,7 @@ class PadZ(object):
 
 class CreateGaussianTargets(object):
     def __init__(self, sigma, measure_name):
-       self.sigma=sigma
+       self.sigma = sigma
        columns_to_ids = ["_X1", "_X2", "_Y1", "_Y2"]
        self.measure_names = [measure_name + a for a in columns_to_ids]
 
@@ -118,10 +118,10 @@ class CreateGaussianTargets(object):
         img_size = np.shape(sample["image"][0])
         imgs = np.zeros((2, img_size[0],img_size[1]))
 
-        x1,x2,y1,y2 = (sample[a] for a in self.measure_names)
-        pt1 = [y1,x1]
-        pt2 = [y2,x2]
-        pts = [pt1,pt2]
+        x1, x2, y1, y2 = (sample[a] for a in self.measure_names)
+        pt1 = [y1, x1]
+        pt2 = [y2, x2]
+        pts = [pt1, pt2]
 
         for i in range(2):
             pt = pts[i]
@@ -218,6 +218,7 @@ class RandomFlip(object):
         
         subs_flip = random.sample(range(slices),k=int(slices/2))
         subs_rotate = random.sample(range(slices),k=int(slices/2))
+
         img_out = img.clone()
         img_out[subs_flip,:,:] = torch.flip(img[subs_flip,:,:],[1,2])
         img_out[subs_rotate,:,:] = torch.rot90(img_out[subs_rotate,:,:],1,[1,2])
