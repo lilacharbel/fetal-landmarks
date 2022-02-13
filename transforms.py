@@ -75,9 +75,10 @@ class Rescale(object):
         assert isinstance(output_size, (int, tuple))
         self.output_size = output_size
     
-    @all_except(tag="image")
+    @all_except(tag=["image", "output_map"])
     def __call__(self, sample:np.ndarray)-> np.ndarray:
         image = sample["image"]
+        output_maps = sample["output_maps"]
         h, w = image.shape[1:3]
         
         if isinstance(self.output_size, int):
@@ -91,7 +92,9 @@ class Rescale(object):
         new_h, new_w = int(new_h), int(new_w)
 
         img = ndimage.zoom(image, (1, new_h/h, new_w/w)) #TODO:support ND
-        return img
+        output_maps = ndimage.zoom(output_maps, (1, new_h/h, new_w/w))
+
+        return {'image':image, 'output_maps':output_maps}
 
 class PadZ(object):
     def __init__(self, pad):
@@ -111,9 +114,9 @@ class CreateGaussianTargets(object):
 
     @all_except(tag="output_maps")
     def __call__(self, sample):
-        
-        # print("Debug")
-        imgs = np.zeros((2, 512, 512))
+
+        (size_x, size_y) = np.shape(sample["image"]) #TODO:seg_image / image
+        imgs = np.zeros((2, size_x, size_y))
 
         x1,x2,y1,y2 = (sample[a] for a in self.measure_names)
         pt1 = [y1,x1]
@@ -210,6 +213,7 @@ class RandomFlip(object):
     @all_except(tag="image")
     def __call__(self, sample):
         img = sample["image"]
+        output_maps = sample["output_maps"]
         slices = img.size()[0]
         
         subs_flip = random.sample(range(slices),k=int(slices/2))
@@ -218,11 +222,15 @@ class RandomFlip(object):
         img_out[subs_flip,:,:] = torch.flip(img[subs_flip,:,:],[1,2])
         img_out[subs_rotate,:,:] = torch.rot90(img_out[subs_rotate,:,:],1,[1,2])
 
-        return img_out
+        output_maps_out = output_maps.clone()
+        output_maps_out[subs_flip, :, :] = torch.flip(output_maps[subs_flip, :, :], [1, 2])
+        output_maps_out[subs_rotate, :, :] = torch.rot90(output_maps_out[subs_rotate, :, :], 1, [1, 2])
+
+        return {'image':img_out, 'output_maps':output_maps_out}
 
 
 class RandomRotate(object):
-    @all_except(tag=["image", "seg_image"])
+    @all_except(tag=["image", "seg_image", "output_maps"])
     def __call__(self, sample):
         rot_angle = np.random.randint(360)
         # image_g = cp.asarray(sample["image"].astype(np.float32))
@@ -234,8 +242,9 @@ class RandomRotate(object):
         # seg_image = cp.asnumpy(elem_nii_rot_seg)
         image = ndimage.rotate(sample["image"], angle= rot_angle,axes=(1,2))
         seg_image = ndimage.rotate(sample["seg_image"], angle= rot_angle,axes=(1,2))
+        output_maps = ndimage.rotate(sample["output_maps"], angle= rot_angle,axes=(1,2))
       
-        return {'image':image, 'seg_image':seg_image}
+        return {'image':image, 'seg_image':seg_image, 'output_maps':output_maps}
 
 
 class toXY(object):
@@ -253,10 +262,11 @@ class cropByBBox(object):
         self.min_upcrop = min_upcrop
         self.max_upcrop = max_upcrop
 
-    @all_except(tag="image")
+    @all_except(tag=["image", "output_maps"])
     def __call__(self, sample):
         img = sample["image"]
         seg_image = sample["seg_image"]
+        output_maps = sample["output_maps"]
         bbox_idxs = bbox_ND(seg_image)
 
         bbox_idxs = (np.array([0,seg_image.shape[0]]), *bbox_idxs[1:])
@@ -281,8 +291,9 @@ class cropByBBox(object):
         #Slice
         bbox_slice = ( slice(*bbox_z), slice(*bbox_x), slice(*bbox_y))
         img_out = img[bbox_slice]
+        output_maps_out = output_maps[bbox_slice]
 
-        return img_out
+        return {'image':img_out, 'output_maps':output_maps_out}
 
 def custom_collate_fn(batch):
     x , y = default_collate_func(batch)
