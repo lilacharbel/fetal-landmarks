@@ -14,7 +14,16 @@ import time
 import copy
 import os
 
-
+# for HRNet
+import sys
+sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
+import tools._init_paths
+#import models as models_hrnet
+import mod_hrnet
+from config import config
+from config import update_config
+from utils.utils import get_optimizer
+#
 
 from loader import NiftiDataset, random_split
 import transforms as tfs
@@ -85,7 +94,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                            only_tag=True,
                            tagname=data["selection_idx"],
                            transform=transforms.Compose([
-
+                            tfs.CreateGaussianTargets(sigma=1., measure_names="Measure_BBD"),
                             tfs.RandomRotate(),
                             tfs.cropByBBox(min_upcrop=1.0, max_upcrop=1.3),
                             tfs.PadZ(data['context']),
@@ -108,7 +117,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     #It is not going to be elegant.... special augmentation for test
     test_ds.dataset = copy.copy(dataset)
     test_ds.dataset.transform = transforms.Compose([ 
-
+                                                
                                             tfs.cropByBBox(min_upcrop=None, max_upcrop=None),
                                             tfs.PadZ(data['context']),
                                             tfs.Rescale((224,224)),
@@ -155,24 +164,49 @@ def create_model(optimizer_params, basenet):
         model_ft = models.densenet121(pretrained=True)
     elif basenet == "VGG16":
         model_ft = models.vgg16_bn(pretrained=True)
+    elif basenet == "HRNet":
+        config.merge_from_file("/media/df4-projects/Lilach/HRnet_models/cls_landmark_config.yaml")
+        config['MODEL']['PRETRAINED'] = "/media/df4-projects/Lilach/HRNet-Image-Classification/pretrained/hrnet_w18_small_model_v2.pth"
+        model_ft = mod_hrnet.get_HRnet(config)
+        pretrained = "/media/df4-projects/Lilach/HRNet-Image-Classification/pretrained/hrnet_w18_small_model_v2.pth"
+        model_ft.init_weights(pretrained)
 
     if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
         num_ftrs = model_ft.fc.in_features
         model_ft.fc = nn.Linear(num_ftrs, 2)
-    elif basenet in ['DenseNet121',]:
+    elif basenet in ['DenseNet121','HRNet',]:
         num_ftrs = model_ft.classifier.in_features
         model_ft.classifier = nn.Linear(num_ftrs, 2)
     elif basenet in [ 'VGG16',]:
         num_ftrs = model_ft.classifier[6].in_features
         model_ft.classifier[6] = nn.Linear(num_ftrs, 2)
+
     criterion = nn.CrossEntropyLoss()
 
     # Observe that all parameters are being optimized
     optimizer_ft = optim.SGD(model_ft.parameters(), lr=optimizer_params['lr'], momentum=optimizer_params['momentum'])
 
     # Decay LR by a factor of 0.1 every 7 epochs
-    exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=optimizer_params['step_size'], gamma=optimizer_params['gamma'])
-    #exp_lr_scheduler= lr_scheduler.CyclicLR(optimizer_ft, base_lr=optimizer_params['lr'], max_lr=optimizer_params['lr']*10)
+    ##exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=optimizer_params['step_size'], gamma=optimizer_params['gamma'])
+    exp_lr_scheduler= lr_scheduler.CyclicLR(optimizer_ft, base_lr=optimizer_params['lr'], max_lr=optimizer_params['lr']*10)
+
+    
+
+    # optimizer_ft = get_optimizer(config, model_ft)
+    # last_epoch = config.TRAIN.BEGIN_EPOCH
+
+    # if isinstance(config.TRAIN.LR_STEP, list):
+    #     exp_lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+    #         optimizer_ft, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR,
+    #         last_epoch-1
+    #     )
+    # else:
+    #     exp_lr_scheduler = torch.optim.lr_scheduler.StepLR(
+    #         optimizer_ft, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR,
+    #         last_epoch-1
+    #     )
+
+    # ####
 
     return model_ft, criterion, optimizer_ft, exp_lr_scheduler
 
@@ -200,7 +234,7 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
             if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
                 for param in model.fc.parameters():
                     param.requires_grad = True
-            elif basenet in ['DenseNet121', 'VGG16']:
+            elif basenet in ['DenseNet121', 'VGG16', 'HRNet']:
                 for param in model.classifier.parameters():
                     param.requires_grad = True
             if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
@@ -238,7 +272,8 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
+                    outputs, _ = model(inputs)
+                    
                     _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs, labels)
 
@@ -268,8 +303,8 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 print('{} Loss: {:.4f} Acc: {:.4f} ChooseAcc {:.4f} ChooseShift {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_choose_acc, epoch_choose_shift))
             else:
                 print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            
             if phase == 'val':
-
                 #Calculate specific Val accuracy
                 #Assuming BS=1 in Val
                 _run.log_scalar('val_choose_acc', float(epoch_choose_acc))
@@ -315,16 +350,16 @@ def get_config():
     batch_size = 6
     num_epochs = 25
     cuda = 1
-    basenet = 'ResNet34'
+    basenet = 'HRNet'
     data = {
         'context': 1,
-        'selection_idx' : 'TCD_Selection',
+        'selection_idx' : 'BBD_Selection',
     }
     db_params = {
-        'root_dir' : '/media/df3-dafna/Netanell/BrainCorToGal_Fixed/',
-        'seg_dir' : '/media/df3-dafna/Netanell/BLLAMODEL/',
-        'csv' : '/media/df3-dafna/Netanell/BLLAMODEL/Data.xlsx',
-        'quality' : 3,
+        'root_dir' : '/media/df4-projects/Lilach/Data/dataset/',
+        'seg_dir' : '/media/df4-projects/Lilach/Data/seg/',
+        'csv' : '/media/df4-projects/Lilach/Data/data_set.xlsx',
+        'quality' : None,
         'pos_neg_ratio' : 2,
         'train_test_split' : 0.8,
     }

@@ -59,10 +59,11 @@ class NiftiDataset(Dataset):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
-            root_dir (string): Directory with all the images.
+            nii_dir (string): Directory with all the images.
+            seg_dir (string): Directory with all the segmantations
+            filter_quality : None
             only_tag (bool): Take only samples with GT
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
+            transform (callable, optional): Optional transform to be applied on a sample.
         """
         df = pd.read_excel(csv_file)
         self.nii_dir = nii_dir
@@ -75,9 +76,10 @@ class NiftiDataset(Dataset):
         if only_tag:
             df = df.dropna(subset=[tagname, ]).reset_index()
 
-        df = df.assign(image=np.nan).assign(seg_image=np.nan)
+        df = df.assign(image=np.nan).assign(seg_image=np.nan).assign(output_maps=np.nan)   #####
         df.image = df.image.astype(object)
         df.seg_image = df.seg_image.astype(object)
+        df.output_maps = df.output_maps.astype(object)      #####
 
         df = df.assign(bbox=np.nan)
         df.bbox = df.bbox.astype(object)
@@ -85,7 +87,7 @@ class NiftiDataset(Dataset):
         df.Subject = df.Subject.astype(int)
         df.SeriesNum = df.SeriesNum.astype(int)
 
-        df.resZ = df.resZ.astype(int)
+        df.resZ = df.resZ.astype(float)
 
         self.metadata = df
 
@@ -96,7 +98,7 @@ class NiftiDataset(Dataset):
 
         # Load Nifti
         if isinstance(self.metadata.at[idx, "image"], float):
-            filename = "Pat{patient_id:02}_Se{series:02}_Res{res_x}_{res_y}_Spac{res_z}.nii"
+            filename = "Pat{patient_id:02}_Se{series:02}_Res{res_x}_{res_y}_Spac{res_z:.1f}.nii"
             fn = filename.format(patient_id=self.metadata.loc[idx, "Subject"],
                                  series=self.metadata.loc[idx, "SeriesNum"],
                                  res_x=self.metadata.loc[idx, "resX"],
@@ -111,7 +113,7 @@ class NiftiDataset(Dataset):
 
         # Load BBox
         if isinstance(self.metadata.at[idx, "seg_image"], float):
-            filename = "Pat{patient_id:02}_Se{series:02}_Res{res_x}_{res_y}_Spac{res_z}_roi_pred_pp.nii.gz"
+            filename = "Pat{patient_id:02}_Se{series:02}_Res{res_x}_{res_y}_Spac{res_z:.1f}.nii.gz"
             fn = filename.format(patient_id=self.metadata.loc[idx, "Subject"],
                                  series=self.metadata.loc[idx, "SeriesNum"],
                                  res_x=self.metadata.loc[idx, "resX"],
