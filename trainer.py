@@ -107,7 +107,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                                              sample_idx=data['selection_idx'],
                                              context=data['context']),
                             #tfs.RandomFlip(),
-                            tfs.toXY("image", data['selection_idx']),
+                            tfs.toXYZ("image", data['selection_idx'], "output_maps"),
                            ]))
     dataset_size = len(dataset) 
     train_size = int(db_params['train_test_split'] * dataset_size)
@@ -130,7 +130,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                                                              sample_idx=data['selection_idx'],
                                                              context=data['context']),
                                             #tfs.RandomFlip(),
-                                            tfs.toXY("image", data['selection_idx']),
+                                            tfs.toXY("image", data['selection_idx'], "output_maps"),
                                            ])
     train_val_ds = copy.copy(test_ds)
     train_val_ds.indices = train_ds.indices
@@ -182,7 +182,8 @@ def create_model(optimizer_params, basenet):
         num_ftrs = model_ft.classifier[6].in_features
         model_ft.classifier[6] = nn.Linear(num_ftrs, 2)
 
-    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
 
     # Observe that all parameters are being optimized
     optimizer_ft = optim.SGD(model_ft.parameters(), lr=optimizer_params['lr'], momentum=optimizer_params['momentum'])

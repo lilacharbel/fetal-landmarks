@@ -313,12 +313,12 @@ class cropByBBox(object):
         return {'image':img_out, 'output_maps':output_maps_out}
 
 def custom_collate_fn(batch):
-    x , y = default_collate_func(batch)
-    #print ('x', x.shape, 'y', y.shape)
+    x , y, z = default_collate_func(batch)
+    # print ('x', x.shape, 'y', y.shape)
     x = x.reshape((x.shape[0]*x.shape[1], *(x.shape[2:])))
     #x = torch.cat([x,x,x], dim=1)
     y = y.reshape((y.shape[0]*y.shape[1], *(y.shape[2:])))
-    #print ('after x', x.shape, 'y', y.shape)
-    return (x, y)
+    # print ('after x', x.shape, 'y', y.shape)
+    return (x, y, z)
 
 
