@@ -75,7 +75,7 @@ class Rescale(object):
         assert isinstance(output_size, (int, tuple))
         self.output_size = output_size
     
-    @all_except(tag=["image", "output_map"])
+    @all_except(tag=["image", "output_maps"])
     def __call__(self, sample:np.ndarray)-> np.ndarray:
         image = sample["image"]
         output_maps = sample["output_maps"]
@@ -184,7 +184,11 @@ class SampleFrom3D(object):
                 all_images = [sample['image'][elem,:,:] for elem in sampling3]
                 img = torch.stack(all_images)
             else:
-                sampling_population = set(range(self.context, sample['image'].shape[0] - self.context))
+                sampling_population = set(range(0, sample['image'].shape[0] - self.context))
+                # print('sampling population', sampling_population)
+                # print('sample[sample_idx]', sample[self.sample_idx])
+                # print('img', sample['Subject'], sample['SeriesNum'])
+                # print('_____________________')
                 sampling_population.remove(sample[self.sample_idx])
                 sampling = random.sample(sampling_population, negative_slides)
                 sampling.append(sample[self.sample_idx])
@@ -246,6 +250,16 @@ class RandomRotate(object):
         output_maps = ndimage.rotate(sample["output_maps"], angle= rot_angle,axes=(1,2))
       
         return {'image':image, 'seg_image':seg_image, 'output_maps':output_maps}
+
+
+class toXYZ(object):
+    def __init__(self, x_type:str, y_type:str, z_type:str):
+        self.x_type = x_type
+        self.y_type = y_type
+        self.z_type = z_type
+
+    def __call__(self, sample)-> Tuple[np.ndarray,np.ndarray]:
+        return sample[self.x_type], sample[self.y_type], sample[self.z_type]
 
 
 class toXY(object):
