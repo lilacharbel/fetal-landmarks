@@ -166,10 +166,10 @@ def create_model(optimizer_params, basenet):
     elif basenet == "VGG16":
         model_ft = models.vgg16_bn(pretrained=True)
     elif basenet == "HRNet":
-        config.merge_from_file("/media/df4-projects/Lilach/HRnet_models/cls_landmark_config.yaml")
-        config['MODEL']['PRETRAINED'] = "/media/df4-projects/Lilach/HRNet-Image-Classification/pretrained/hrnet_w18_small_model_v2.pth"
+        config.merge_from_file("/cls_landmark_config.yaml")
+        config['MODEL']['PRETRAINED'] = "/hrnet_w18_small_model_v2.pth"
         model_ft = mod_hrnet.get_HRnet(config)
-        pretrained = "/media/df4-projects/Lilach/HRNet-Image-Classification/pretrained/hrnet_w18_small_model_v2.pth"
+        pretrained = "/hrnet_w18_small_model_v2.pth"
         model_ft.init_weights(pretrained)
 
     if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
