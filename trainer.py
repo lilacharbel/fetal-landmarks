@@ -94,7 +94,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                            only_tag=True,
                            tagname=data["selection_idx"],
                            transform=transforms.Compose([
-                            tfs.CreateGaussianTargets(sigma=1., measure_names="Measure_BBD"),
+                            tfs.CreateGaussianTargets(sigma=data['sigma'], measure_names=data['measure_idx']),
                             tfs.RandomRotate(),
                             tfs.cropByBBox(min_upcrop=1.0, max_upcrop=1.3),
                             tfs.PadZ(data['context']),
@@ -118,7 +118,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     test_ds.dataset = copy.copy(dataset)
     test_ds.dataset.transform = transforms.Compose([
 
-                                            tfs.CreateGaussianTargets(sigma=1., measure_names="Measure_BBD"),
+                                            tfs.CreateGaussianTargets(sigma=data['sigma'], measure_names=data['measure_idx']),
                                             tfs.cropByBBox(min_upcrop=None, max_upcrop=None),
                                             tfs.PadZ(data['context']),
                                             tfs.Rescale((224,224)),
@@ -187,10 +187,11 @@ def create_model(optimizer_params, basenet):
 
     # Observe that all parameters are being optimized
     optimizer_ft = optim.SGD(model_ft.parameters(), lr=optimizer_params['lr'], momentum=optimizer_params['momentum'])
+    # optimizer_ft = optim.Adam(model_ft.parameters(), lr=optimizer_params['lr'])
 
     # Decay LR by a factor of 0.1 every 7 epochs
-    ##exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=optimizer_params['step_size'], gamma=optimizer_params['gamma'])
-    exp_lr_scheduler= lr_scheduler.CyclicLR(optimizer_ft, base_lr=optimizer_params['lr'], max_lr=optimizer_params['lr']*10)
+    exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=optimizer_params['step_size'], gamma=optimizer_params['gamma'])
+    # exp_lr_scheduler= lr_scheduler.CyclicLR(optimizer_ft, base_lr=optimizer_params['lr'], max_lr=optimizer_params['lr']*10)
 
     
 
@@ -356,6 +357,8 @@ def get_config():
     data = {
         'context': 1,
         'selection_idx' : 'BBD_Selection',
+        'measure_idx': 'Measure_BBD',
+        'sigma': 1.
     }
     db_params = {
         'root_dir' : '/media/df4-projects/Lilach/Data/dataset/',
