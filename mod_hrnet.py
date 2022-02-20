@@ -118,7 +118,7 @@ class HighResolutionModule(nn.Module):
         self.branches = self._make_branches(
             num_branches, blocks, num_blocks, num_channels)
         self.fuse_layers = self._make_fuse_layers()
-        self.relu = nn.ReLU(False)
+        self.relu = nn.ReLU(inplace=True)
 
     def _check_branches(self, num_branches, blocks, num_blocks,
                         num_inchannels, num_channels):
@@ -215,7 +215,7 @@ class HighResolutionModule(nn.Module):
                                           3, 2, 1, bias=False),
                                 nn.BatchNorm2d(num_outchannels_conv3x3,
                                             momentum=BN_MOMENTUM),
-                                nn.ReLU(False)))
+                                nn.ReLU(inplace=True)))
                     fuse_layer.append(nn.Sequential(*conv3x3s))
             fuse_layers.append(nn.ModuleList(fuse_layer))
 
@@ -237,13 +237,11 @@ class HighResolutionModule(nn.Module):
             for j in range(1, self.num_branches):
                 if i == j:
                     y = y + x[j]
-                ####
                 elif j > i:
                     y = y + F.interpolate(
                         self.fuse_layers[i][j](x[j]),
                         size=[x[i].shape[2], x[i].shape[3]],
                         mode='bilinear')
-                ####
                 else:
                     y = y + self.fuse_layers[i][j](x[j])
             x_fuse.append(self.relu(y))
@@ -260,9 +258,12 @@ blocks_dict = {
 class HighResolutionNet(nn.Module):
 
     def __init__(self, cfg, **kwargs):
+        self.inplanes = 64
+        extra = config.MODEL.EXTRA
+
         super(HighResolutionNet, self).__init__()
-        
-        extra = cfg.MODEL.EXTRA   ####
+
+        # stem net
         
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
@@ -271,6 +272,8 @@ class HighResolutionNet(nn.Module):
                                bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
+        self.sf = nn.Softmax(dim=1)
+        self.layer1 = self._make_layer(Bottleneck, 64, 64, 4)
 
         self.stage1_cfg = cfg['MODEL']['EXTRA']['STAGE1']
         num_channels = self.stage1_cfg['NUM_CHANNELS'][0]
@@ -315,7 +318,6 @@ class HighResolutionNet(nn.Module):
 
         self.classifier = nn.Linear(2048, 1000)
 
-        ####
         # Landmarks Head
         final_inp_channels = sum(pre_stage_channels)
         
@@ -335,7 +337,7 @@ class HighResolutionNet(nn.Module):
                 stride=1,
                 padding=1 if extra.FINAL_CONV_KERNEL == 3 else 0)
         )
-        ####
+
         
     def _make_head(self, pre_stage_channels):
         head_block = Bottleneck
@@ -502,7 +504,7 @@ class HighResolutionNet(nn.Module):
             else:
                 x_list.append(y_list[i])
         y_list = self.stage4(x_list)
-        x = self.stage4(x_list) ####
+        x = self.stage4(x_list)
         
         # Classification Head
         y = self.incre_modules[0](y_list[0])
@@ -520,7 +522,7 @@ class HighResolutionNet(nn.Module):
 
         y = self.classifier(y)
         
-        ####
+
         # Landmarks Head
         height, width = x_org.size(2), x_org.size(3)
         x0 = F.interpolate(x[0], size=(height, width), mode='bilinear', align_corners=False)
@@ -528,11 +530,17 @@ class HighResolutionNet(nn.Module):
         x2 = F.interpolate(x[2], size=(height, width), mode='bilinear', align_corners=False)
         x3 = F.interpolate(x[3], size=(height, width), mode='bilinear', align_corners=False)
         x = torch.cat([x0, x1, x2, x3], 1)
-        
+
+        # height, width = x[0].size(2), x[0].size(3)
+        # x1 = F.interpolate(x[1], size=(height, width), mode='bilinear', align_corners=False)
+        # x2 = F.interpolate(x[2], size=(height, width), mode='bilinear', align_corners=False)
+        # x3 = F.interpolate(x[3], size=(height, width), mode='bilinear', align_corners=False)
+        # x = torch.cat([x[0], x1, x2, x3], 1)
+
         x = self.head(x)
-        ####
+
         
-        return y, x    #### classification, landmarks
+        return y, x    # classification, landmarks
     
     def init_weights(self, pretrained='',):
         logger.info('=> init weights from normal distribution')
@@ -560,4 +568,5 @@ class HighResolutionNet(nn.Module):
 def get_HRnet(config, **kwargs):
     model = HighResolutionNet(config, **kwargs)
     model.init_weights()
+
     return model
