@@ -137,7 +137,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                                              sample_idx=data['selection_idx'],
                                              context=data['context']),
                             #tfs.RandomFlip(),
-                            tfs.toXYZ("image", data['selection_idx'], "output_maps"),
+                            tfs.toXYZ("image", data['selection_idx'], "target_maps"),
                            ]))
     dataset_size = len(dataset) 
     train_size = int(db_params['train_test_split'] * dataset_size)
@@ -160,7 +160,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                                                              sample_idx=data['selection_idx'],
                                                              context=data['context']),
                                             #tfs.RandomFlip(),
-                                            tfs.toXY("image", data['selection_idx'], "output_maps"),
+                                            tfs.toXYZ("image", data['selection_idx'], "target_maps"),
                                            ])
     train_val_ds = copy.copy(test_ds)
     train_val_ds.indices = train_ds.indices
@@ -387,17 +387,17 @@ def get_config():
     # basenet = 'HRNet'
     data = {
         'context': 1,
-        'selection_idx' : 'BBD_Selection',
+        'selection_idx': 'BBD_Selection',
         'measure_idx': 'Measure_BBD',
         'sigma': 2.
     }
     db_params = {
-        'root_dir' : '/media/df4-projects/Lilach/Data/dataset/',
-        'seg_dir' : '/media/df4-projects/Lilach/Data/seg/',
-        'csv' : '/media/df4-projects/Lilach/Data/data_set.xlsx',
-        'quality' : None,
-        'pos_neg_ratio' : 2,
-        'train_test_split' : 0.8,
+        'root_dir': '/media/df4-projects/Lilach/Data/dataset/',
+        'seg_dir': '/media/df4-projects/Lilach/Data/seg/',
+        'csv': '/media/df4-projects/Lilach/Data/data_set.xlsx',
+        'quality': None,
+        'pos_neg_ratio': 2,
+        'train_test_split': 0.8,
     }
     optimizer_params = {
         'lr' : 0.0001,

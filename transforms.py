@@ -75,10 +75,10 @@ class Rescale(object):
         assert isinstance(output_size, (int, tuple))
         self.output_size = output_size
     
-    @all_except(tag=["image", "output_maps"])
+    @all_except(tag=["image", "target_maps"])
     def __call__(self, sample:np.ndarray)-> np.ndarray:
         image = sample["image"]
-        output_maps = sample["output_maps"]
+        target_maps = sample["target_maps"]
         h, w = image.shape[1:3]
         
         if isinstance(self.output_size, int):
@@ -92,9 +92,9 @@ class Rescale(object):
         new_h, new_w = int(new_h), int(new_w)
 
         img = ndimage.zoom(image, (1, new_h/h, new_w/w)) #TODO:support ND
-        output_maps_out = ndimage.zoom(output_maps, (1, new_h/h, new_w/w))
+        target_maps_out = ndimage.zoom(target_maps, (1, new_h/h, new_w/w))
 
-        return {'image':img, 'output_maps':output_maps_out}
+        return {'image':img, 'target_maps':target_maps_out}
 
 class PadZ(object):
     def __init__(self, pad):
@@ -112,7 +112,7 @@ class CreateGaussianTargets(object):
        columns_to_ids = ["_X1", "_X2", "_Y1", "_Y2"]
        self.measure_names = [measure_name + a for a in columns_to_ids]
 
-    @all_except(tag="output_maps")
+    @all_except(tag="target_maps")
     def __call__(self, sample):
 
         img_size = np.shape(sample["image"][0])
@@ -214,10 +214,10 @@ class SampleFrom3D(object):
 
 
 class RandomFlip(object):
-    @all_except(tag=["image", "output_maps"])
+    @all_except(tag=["image", "target_maps"])
     def __call__(self, sample):
         img = sample["image"]
-        output_maps = sample["output_maps"]
+        target_maps = sample["target_maps"]
         slices = img.size()[0]
         
         subs_flip = random.sample(range(slices),k=int(slices/2))
@@ -227,15 +227,15 @@ class RandomFlip(object):
         img_out[subs_flip,:,:] = torch.flip(img[subs_flip,:,:],[1,2])
         img_out[subs_rotate,:,:] = torch.rot90(img_out[subs_rotate,:,:],1,[1,2])
 
-        output_maps_out = output_maps.clone()
-        output_maps_out[subs_flip, :, :] = torch.flip(output_maps[subs_flip, :, :], [1, 2])
-        output_maps_out[subs_rotate, :, :] = torch.rot90(output_maps_out[subs_rotate, :, :], 1, [1, 2])
+        target_maps_out = target_maps.clone()
+        target_maps_out[subs_flip, :, :] = torch.flip(target_maps[subs_flip, :, :], [1, 2])
+        target_maps_out[subs_rotate, :, :] = torch.rot90(target_maps_out[subs_rotate, :, :], 1, [1, 2])
 
-        return {'image':img_out, 'output_maps':output_maps_out}
+        return {'image':img_out, 'target_maps':target_maps_out}
 
 
 class RandomRotate(object):
-    @all_except(tag=["image", "seg_image", "output_maps"])
+    @all_except(tag=["image", "seg_image", "target_maps"])
     def __call__(self, sample):
         rot_angle = np.random.randint(360)
         # image_g = cp.asarray(sample["image"].astype(np.float32))
@@ -247,9 +247,9 @@ class RandomRotate(object):
         # seg_image = cp.asnumpy(elem_nii_rot_seg)
         image = ndimage.rotate(sample["image"], angle= rot_angle,axes=(1,2))
         seg_image = ndimage.rotate(sample["seg_image"], angle= rot_angle,axes=(1,2))
-        output_maps = ndimage.rotate(sample["output_maps"], angle= rot_angle,axes=(1,2))
+        target_maps = ndimage.rotate(sample["target_maps"], angle= rot_angle,axes=(1,2))
       
-        return {'image':image, 'seg_image':seg_image, 'output_maps':output_maps}
+        return {'image':image, 'seg_image':seg_image, 'target_maps':target_maps}
 
 
 class toXYZ(object):
@@ -277,11 +277,11 @@ class cropByBBox(object):
         self.min_upcrop = min_upcrop
         self.max_upcrop = max_upcrop
 
-    @all_except(tag=["image", "output_maps"])
+    @all_except(tag=["image", "target_maps"])
     def __call__(self, sample):
         img = sample["image"]
         seg_image = sample["seg_image"]
-        output_maps = sample["output_maps"]
+        target_maps = sample["target_maps"]
         bbox_idxs = bbox_ND(seg_image)
 
         bbox_idxs = (np.array([0,seg_image.shape[0]]), *bbox_idxs[1:])
@@ -308,9 +308,9 @@ class cropByBBox(object):
         bbox_slice_maps = ( slice(*[0, 2]), slice(*bbox_x), slice(*bbox_y))
 
         img_out = img[bbox_slice]
-        output_maps_out = output_maps[bbox_slice_maps]
+        target_maps_out = target_maps[bbox_slice_maps]
 
-        return {'image':img_out, 'output_maps':output_maps_out}
+        return {'image':img_out, 'target_maps':target_maps_out}
 
 def custom_collate_fn(batch):
     x , y, z = default_collate_func(batch)

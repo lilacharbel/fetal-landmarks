@@ -76,10 +76,10 @@ class NiftiDataset(Dataset):
         if only_tag:
             df = df.dropna(subset=[tagname, ]).reset_index()
 
-        df = df.assign(image=np.nan).assign(seg_image=np.nan).assign(output_maps=np.nan)   #####
+        df = df.assign(image=np.nan).assign(seg_image=np.nan).assign(target_maps=np.nan)
         df.image = df.image.astype(object)
         df.seg_image = df.seg_image.astype(object)
-        df.output_maps = df.output_maps.astype(object)      #####
+        df.target_maps = df.target_maps.astype(object)
 
         df = df.assign(bbox=np.nan)
         df.bbox = df.bbox.astype(object)
