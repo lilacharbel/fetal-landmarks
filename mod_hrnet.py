@@ -44,10 +44,10 @@ class BasicBlock(nn.Module):
     def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False
+        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False
+        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False)
         self.downsample = downsample
         self.stride = stride
 
@@ -75,14 +75,14 @@ class Bottleneck(nn.Module):
     def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False
+        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False
+        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM, track_running_stats=False)
         self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1,
                                bias=False)
         self.bn3 = nn.BatchNorm2d(planes * self.expansion,
-                               momentum=BN_MOMENTUM, track_running_stats=False
+                               momentum=BN_MOMENTUM, track_running_stats=False)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -157,7 +157,7 @@ class HighResolutionModule(nn.Module):
                           num_channels[branch_index] * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(num_channels[branch_index] * block.expansion,
-                            momentum=BN_MOMENTUM, track_running_stats=False,
+                            momentum=BN_MOMENTUM, track_running_stats=False),
             )
 
         layers = []
@@ -199,7 +199,7 @@ class HighResolutionModule(nn.Module):
                                   0,
                                   bias=False),
                         nn.BatchNorm2d(num_inchannels[i], 
-                                       momentum=BN_MOMENTUM, track_running_stats=False,
+                                       momentum=BN_MOMENTUM, track_running_stats=False),
                         nn.Upsample(scale_factor=2**(j-i), mode='nearest')))
                 elif j == i:
                     fuse_layer.append(None)
@@ -213,7 +213,7 @@ class HighResolutionModule(nn.Module):
                                           num_outchannels_conv3x3,
                                           3, 2, 1, bias=False),
                                 nn.BatchNorm2d(num_outchannels_conv3x3, 
-                                            momentum=BN_MOMENTUM, track_running_stats=False))
+                                            momentum=BN_MOMENTUM, track_running_stats=False)))
                         else:
                             num_outchannels_conv3x3 = num_inchannels[j]
                             conv3x3s.append(nn.Sequential(
@@ -221,7 +221,7 @@ class HighResolutionModule(nn.Module):
                                           num_outchannels_conv3x3,
                                           3, 2, 1, bias=False),
                                 nn.BatchNorm2d(num_outchannels_conv3x3,
-                                            momentum=BN_MOMENTUM, track_running_stats=False,
+                                            momentum=BN_MOMENTUM, track_running_stats=False),
                                 nn.ReLU(inplace=True)))
                     fuse_layer.append(nn.Sequential(*conv3x3s))
             fuse_layers.append(nn.ModuleList(fuse_layer))
@@ -274,10 +274,10 @@ class HighResolutionNet(nn.Module):
         
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM, track_running_stats=False
+        self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM, track_running_stats=False)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
-        self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM, track_running_stats=False
+        self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM, track_running_stats=False)
         self.relu = nn.ReLU(inplace=True)
         self.sf = nn.Softmax(dim=1)
         self.layer1 = self._make_layer(Bottleneck, 64, 64, 4)
@@ -335,7 +335,7 @@ class HighResolutionNet(nn.Module):
                 kernel_size=1,
                 stride=1,
                 padding=1 if extra.FINAL_CONV_KERNEL == 3 else 0),
-            BatchNorm2d(final_inp_channels, momentum=BN_MOMENTUM, track_running_stats=False,
+            BatchNorm2d(final_inp_channels, momentum=BN_MOMENTUM, track_running_stats=False),
             nn.ReLU(inplace=True),
             nn.Conv2d(
                 in_channels=final_inp_channels,
@@ -374,7 +374,7 @@ class HighResolutionNet(nn.Module):
                           kernel_size=3,
                           stride=2,
                           padding=1),
-                nn.BatchNorm2d(out_channels, momentum=BN_MOMENTUM, track_running_stats=False,
+                nn.BatchNorm2d(out_channels, momentum=BN_MOMENTUM, track_running_stats=False),
                 nn.ReLU(inplace=True)
             )
 
@@ -389,7 +389,7 @@ class HighResolutionNet(nn.Module):
                 stride=1,
                 padding=0
             ),
-            nn.BatchNorm2d(2048, momentum=BN_MOMENTUM, track_running_stats=False,
+            nn.BatchNorm2d(2048, momentum=BN_MOMENTUM, track_running_stats=False),
             nn.ReLU(inplace=True)
         )
 
@@ -412,7 +412,7 @@ class HighResolutionNet(nn.Module):
                                   1,
                                   bias=False),
                         nn.BatchNorm2d(
-                            num_channels_cur_layer[i], momentum=BN_MOMENTUM, track_running_stats=False,
+                            num_channels_cur_layer[i], momentum=BN_MOMENTUM, track_running_stats=False),
                         nn.ReLU(inplace=True)))
                 else:
                     transition_layers.append(None)
@@ -425,7 +425,7 @@ class HighResolutionNet(nn.Module):
                     conv3x3s.append(nn.Sequential(
                         nn.Conv2d(
                             inchannels, outchannels, 3, 2, 1, bias=False),
-                        nn.BatchNorm2d(outchannels, momentum=BN_MOMENTUM, track_running_stats=False,
+                        nn.BatchNorm2d(outchannels, momentum=BN_MOMENTUM, track_running_stats=False),
                         nn.ReLU(inplace=True)))
                 transition_layers.append(nn.Sequential(*conv3x3s))
 
@@ -437,7 +437,7 @@ class HighResolutionNet(nn.Module):
             downsample = nn.Sequential(
                 nn.Conv2d(inplanes, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes * block.expansion, momentum=BN_MOMENTUM, track_running_stats=False,
+                nn.BatchNorm2d(planes * block.expansion, momentum=BN_MOMENTUM, track_running_stats=False),
             )
 
         layers = []
