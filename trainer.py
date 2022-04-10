@@ -13,6 +13,7 @@ from torch.optim import lr_scheduler
 import time
 import copy
 import os
+import numpy as np
 
 # for HRNet
 import sys
@@ -73,6 +74,35 @@ def save_model(model, epoch, directory, metrics, filename=None):
     print(f"Saved model at {filename}")
 
     return filename
+
+
+def ptsFromGaussian(maps):
+    maps = maps.cpu().detach().numpy()
+    M = np.size(maps, 0)  # number of imgs
+    N = np.size(maps, 1)  # number of points = 2
+    pts = np.empty([M, N, 2])
+
+    for i in range(M):
+        for j in range(N):
+            map_gaus = maps[i, j, :, :]
+            pts[i, j, 0] = np.argmax(np.amax(maps[i, j, :, :], 1))
+            pts[i, j, 1] = np.argmax(np.amax(maps[i, j, :, :], 0))
+
+    return pts
+
+
+def compute_nme(preds, targets):
+    preds_pts = ptsFromGaussian(preds)
+    targets_pts = ptsFromGaussian(targets)
+
+    N = preds.shape[0]  # number of slices
+    L = preds.shape[1]  # number of points = 2
+    rmse = np.zeros(N)
+
+    for i in range(N):
+        rmse[i] = np.sum(np.linalg.norm(preds_pts - targets_pts, axis=1)) / L
+
+    return rmse
 
 
 @ex.capture
@@ -153,41 +183,23 @@ def create_dataloaders(cuda, batch_size, db_params, data):
 
 @ex.capture
 def create_model(optimizer_params, basenet):
-    if basenet == 'ResNet18':
-        model_ft = models.resnet18(pretrained=True)
-    elif basenet =='ResNet34':
-        model_ft = models.resnet34(pretrained=True)
-    elif basenet == 'ResNet50':
-        model_ft = models.resnet50(pretrained=True)
-    elif basenet == 'WideResNet50':
-        model_ft = models.wide_resnet50_2(pretrained=True)
-    elif basenet == 'DenseNet121':
-        model_ft = models.densenet121(pretrained=True)
-    elif basenet == "VGG16":
-        model_ft = models.vgg16_bn(pretrained=True)
-    elif basenet == "HRNet":
-        config.merge_from_file("/cls_landmark_config.yaml")
-        config['MODEL']['PRETRAINED'] = "/hrnet_w18_small_model_v2.pth"
-        model_ft = mod_hrnet.get_HRnet(config)
-        pretrained = "/hrnet_w18_small_model_v2.pth"
-        model_ft.init_weights(pretrained)
 
-    if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
-        num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs, 2)
-    elif basenet in ['DenseNet121','HRNet',]:
-        num_ftrs = model_ft.classifier.in_features
-        model_ft.classifier = nn.Linear(num_ftrs, 2)
-    elif basenet in [ 'VGG16',]:
-        num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs, 2)
+    config.merge_from_file("/cls_landmark_config.yaml")
+    config['MODEL']['PRETRAINED'] = "/hrnet_w18_small_model_v2.pth"
+    model_ft = mod_hrnet.get_HRnet(config)
+    pretrained = "/hrnet_w18_small_model_v2.pth"
+    model_ft.init_weights(pretrained)
+
+    num_ftrs = model_ft.classifier.in_features
+    model_ft.classifier = nn.Linear(num_ftrs, 2)
+
 
     # criterion = nn.CrossEntropyLoss()
-    criterion = nn.MSELoss()
+    criterion = nn.MSELoss(size_average=True)
 
     # Observe that all parameters are being optimized
-    optimizer_ft = optim.SGD(model_ft.parameters(), lr=optimizer_params['lr'], momentum=optimizer_params['momentum'])
-    # optimizer_ft = optim.Adam(model_ft.parameters(), lr=optimizer_params['lr'])
+    # optimizer_ft = optim.SGD(model_ft.parameters(), lr=optimizer_params['lr'], momentum=optimizer_params['momentum'])
+    optimizer_ft = optim.Adam(model_ft.parameters(), lr=optimizer_params['lr'])
 
     # Decay LR by a factor of 0.1 every 7 epochs
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=optimizer_params['step_size'], gamma=optimizer_params['gamma'])
@@ -214,7 +226,7 @@ def create_model(optimizer_params, basenet):
     return model_ft, criterion, optimizer_ft, exp_lr_scheduler
 
 @ex.capture
-def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run, num_epochs, optimizer_params, basenet):
+def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run, num_epochs, optimizer_params):
     since = time.time()
     run_dir = os.path.join(save_dir, str(_run._id))
     os.makedirs(run_dir, exist_ok=True)
@@ -223,6 +235,9 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
     best_acc = 0.0
     best_model_epoch = 0
 
+    best_loss = 100
+    best_nme = 100
+    nme = 0
     
 
     for epoch in range(num_epochs):
@@ -234,15 +249,10 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
             for param in model.parameters():
                 param.requires_grad = False
             #Unfreeze last layer
-            if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
-                for param in model.fc.parameters():
-                    param.requires_grad = True
-            elif basenet in ['DenseNet121', 'VGG16', 'HRNet']:
-                for param in model.classifier.parameters():
-                    param.requires_grad = True
-            if basenet in ['ResNet18', 'ResNet34', 'ResNet50', 'WideResNet50']:
-                for param in model.conv1.parameters():
-                    param.requires_grad = True
+
+            for param in model.classifier.parameters():
+                param.requires_grad = True
+
 
         #if epoch % 10 == 0:
         #dataloaders['train'].dataset.dataset.transform.transforms[6].negative_slides = int((30 - epoch) / 3) + 1
@@ -258,15 +268,20 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
 
             running_loss = 0.0
             running_corrects = 0
-            running_choose_acc = 0.0
-            running_shift = 0.0
+            # running_choose_acc = 0.0
+            # running_shift = 0.0
+
+            nme_count = 0
+            nme_batch_sum = 0
+            nme = 0
             
             epoch_elem_size = 0
             # Iterate over data.
-            for inputs, labels in dataloaders[phase]:
+            for inputs, labels, target_maps in dataloaders[phase]:
                 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                target_maps = target_maps.to(device).float()
                 
                 epoch_elem_size += inputs.size(0)
                 # zero the parameter gradients
@@ -275,9 +290,9 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs, _ = model(inputs)
+                    _, output_maps = model(inputs)
                     
-                    _, preds = torch.max(outputs, 1)
+                    # _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs, labels)
 
                     # backward + optimize only if in training phase
@@ -287,7 +302,11 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                # running_corrects += torch.sum(preds == labels.data)
+
+                nme_temp = compute_nme(output_maps, target_maps)
+                nme_batch_sum += np.sum(nme_temp)
+                nme_count = nme_count + output_maps.size(0)
 
                 if phase in ['val', 'val_train']:
                     output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
@@ -299,34 +318,43 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                     
 
             epoch_loss = running_loss / epoch_elem_size
-            epoch_acc = running_corrects.double() / epoch_elem_size
+            # epoch_acc = running_corrects.double() / epoch_elem_size
+            nme = nme_batch_sum / nme_count
+
             if phase in ['val', 'val_train']:
                 epoch_choose_acc = running_choose_acc / len(dataloaders[phase])
                 epoch_choose_shift = running_shift / len(dataloaders[phase])
-                print('{} Loss: {:.4f} Acc: {:.4f} ChooseAcc {:.4f} ChooseShift {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_choose_acc, epoch_choose_shift))
+                # print('{} Loss: {:.4f} Acc: {:.4f} ChooseAcc {:.4f} ChooseShift {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_choose_acc, epoch_choose_shift))
+                print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
             else:
-                print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
-            
+                # print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+                print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
+
             if phase == 'val':
                 #Calculate specific Val accuracy
                 #Assuming BS=1 in Val
-                _run.log_scalar('val_choose_acc', float(epoch_choose_acc))
-                _run.log_scalar('val_choose_shift', float(epoch_choose_shift))
-                _run.log_scalar('val_loss', float(epoch_loss))
-                _run.log_scalar('val_accuracy', float(epoch_acc))
+                # _run.log_scalar('val_choose_acc', float(epoch_choose_acc))
+                # _run.log_scalar('val_choose_shift', float(epoch_choose_shift))
+                # _run.log_scalar('val_loss', float(epoch_loss))
+                # _run.log_scalar('val_accuracy', float(epoch_acc))
+                _run.log_scalar('val_nme', float(nme))
             elif phase == 'val_train':
-                _run.log_scalar('vtrain_choose_acc', float(epoch_choose_acc))
-                _run.log_scalar('vtrain_choose_shift', float(epoch_choose_shift))
-                _run.log_scalar('vtrain_loss', float(epoch_loss))
-                _run.log_scalar('vtrain_accuracy', float(epoch_acc))
+                # _run.log_scalar('vtrain_choose_acc', float(epoch_choose_acc))
+                # _run.log_scalar('vtrain_choose_shift', float(epoch_choose_shift))
+                # _run.log_scalar('vtrain_loss', float(epoch_loss))
+                # _run.log_scalar('vtrain_accuracy', float(epoch_acc))
+                _run.log_scalar('val_nme', float(nme))
             elif phase == 'train':
-                _run.log_scalar('train_loss', float(epoch_loss))
-                _run.log_scalar('train_accuracy', float(epoch_acc))
+                # _run.log_scalar('train_loss', float(epoch_loss))
+                # _run.log_scalar('train_accuracy', float(epoch_acc))
+                _run.log_scalar('val_nme', float(nme))
 
 
             # deep copy the model
-            if phase == 'val' and epoch_choose_acc > best_acc:
-                best_acc = epoch_choose_acc
+            # if phase == 'val' and epoch_choose_acc > best_acc:
+            if phase == 'val' and nme < best_nme:
+                # best_acc = epoch_choose_acc
+                best_nme = nme
                 best_model_wts = copy.deepcopy(model.state_dict())
                 best_model_epoch = epoch
             if phase == 'train':
@@ -335,16 +363,19 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
-    print('Best val Acc: {:4f}'.format(best_acc))
+    # print('Best val Acc: {:4f}'.format(best_acc))
+    print('Best nme: {:4f}'.format(best_nme))
 
     # Save last epoch model
-    model_fname = save_model(model, epoch, run_dir, {'choose_acc' : epoch_choose_acc})
+    # model_fname = save_model(model, epoch, run_dir, {'choose_acc' : epoch_choose_acc})
+    model_fname = save_model(model, epoch, run_dir, {'nme': nme})
     _run.add_artifact(model_fname, "model_lastepoch")
 
     # load best model weights
     model.load_state_dict(best_model_wts)
 
-    model_fname = save_model(model, best_model_epoch, run_dir, {'choose_acc' : best_acc})
+    # model_fname = save_model(model, best_model_epoch, run_dir, {'choose_acc' : best_acc})
+    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme})
     _run.add_artifact(model_fname, "model")
     return model
 
@@ -353,12 +384,12 @@ def get_config():
     batch_size = 6
     num_epochs = 25
     cuda = 1
-    basenet = 'HRNet'
+    # basenet = 'HRNet'
     data = {
         'context': 1,
         'selection_idx' : 'BBD_Selection',
         'measure_idx': 'Measure_BBD',
-        'sigma': 1.
+        'sigma': 2.
     }
     db_params = {
         'root_dir' : '/media/df4-projects/Lilach/Data/dataset/',
@@ -369,7 +400,7 @@ def get_config():
         'train_test_split' : 0.8,
     }
     optimizer_params = {
-        'lr' : 0.001,
+        'lr' : 0.0001,
         'momentum' : 0.9,
         'step_size' : 7,
         'gamma' : 0.1,
