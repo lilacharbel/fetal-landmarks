@@ -531,18 +531,18 @@ class HighResolutionNet(nn.Module):
         
 
         # Landmarks Head
-        # height, width = x_org.size(2), x_org.size(3)
-        # x0 = F.interpolate(x[0], size=(height, width), mode='bilinear', align_corners=False)
-        # x1 = F.interpolate(x[1], size=(height, width), mode='bilinear', align_corners=False)
-        # x2 = F.interpolate(x[2], size=(height, width), mode='bilinear', align_corners=False)
-        # x3 = F.interpolate(x[3], size=(height, width), mode='bilinear', align_corners=False)
-        # x = torch.cat([x0, x1, x2, x3], 1)
-
-        height, width = x[0].size(2), x[0].size(3)
+        height, width = x_org.size(2), x_org.size(3)
+        x0 = F.interpolate(x[0], size=(height, width), mode='bilinear', align_corners=False)
         x1 = F.interpolate(x[1], size=(height, width), mode='bilinear', align_corners=False)
         x2 = F.interpolate(x[2], size=(height, width), mode='bilinear', align_corners=False)
         x3 = F.interpolate(x[3], size=(height, width), mode='bilinear', align_corners=False)
-        x = torch.cat([x[0], x1, x2, x3], 1)
+        x = torch.cat([x0, x1, x2, x3], 1)
+
+        # height, width = x[0].size(2), x[0].size(3)
+        # x1 = F.interpolate(x[1], size=(height, width), mode='bilinear', align_corners=False)
+        # x2 = F.interpolate(x[2], size=(height, width), mode='bilinear', align_corners=False)
+        # x3 = F.interpolate(x[3], size=(height, width), mode='bilinear', align_corners=False)
+        # x = torch.cat([x[0], x1, x2, x3], 1)
 
         x = self.head(x)
 
