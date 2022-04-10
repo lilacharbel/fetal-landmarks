@@ -116,7 +116,7 @@ class CreateGaussianTargets(object):
     def __call__(self, sample):
 
         img_size = np.shape(sample["image"][0])
-        imgs = np.zeros((2, img_size[0],img_size[1]))
+        imgs = np.zeros((2, img_size[0],img_size[1])).astype(float)
 
         x1, x2, y1, y2 = (sample[a] for a in self.measure_names)
         pt1 = [y1, x1]
@@ -214,7 +214,7 @@ class SampleFrom3D(object):
 
 
 class RandomFlip(object):
-    @all_except(tag="image")
+    @all_except(tag=["image", "output_maps"])
     def __call__(self, sample):
         img = sample["image"]
         output_maps = sample["output_maps"]
