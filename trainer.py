@@ -14,7 +14,7 @@ import time
 import copy
 import os
 import numpy as np
-
+import matplotlib.pyplot as plt
 # for HRNet
 import sys
 sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
@@ -156,7 +156,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                                             tfs.ToTensor(),
                                             tfs.Normalize(mean=0.456,
                                                             std=0.224),
-                                            tfs.SampleFrom3D(None,
+                                            tfs.SampleFrom3D(0,
                                                              sample_idx=data['selection_idx'],
                                                              context=data['context']),
                                             #tfs.RandomFlip(),
@@ -238,7 +238,8 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
     best_loss = 100
     best_nme = 100
     nme = 0
-    
+
+    plt.figure()
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -274,7 +275,7 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
             nme_count = 0
             nme_batch_sum = 0
             nme = 0
-            
+
             epoch_elem_size = 0
             # Iterate over data.
             for inputs, labels, target_maps in dataloaders[phase]:
@@ -308,13 +309,13 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 nme_batch_sum += np.sum(nme_temp)
                 nme_count = nme_count + output_maps.size(0)
 
-                if phase in ['val', 'val_train']:
-                    output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
-                    max_val, max_idx = torch.max(output_sfmax[:,1],dim=0)
-                    max_val_lbl, max_val_idx = torch.max(labels.data,dim=0)
-                    running_choose_acc += (1. - (abs(float(max_idx) - float(max_val_idx))/float(inputs.size(0))))
-                    running_shift += abs(float(max_idx) - float(max_val_idx))
-                    #print(max_idx, max_val_idx, running_idx)
+                # if phase in ['val', 'val_train']:
+                #     output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
+                #     max_val, max_idx = torch.max(output_sfmax[:,1],dim=0)
+                #     max_val_lbl, max_val_idx = torch.max(labels.data,dim=0)
+                #     running_choose_acc += (1. - (abs(float(max_idx) - float(max_val_idx))/float(inputs.size(0))))
+                #     running_shift += abs(float(max_idx) - float(max_val_idx))
+                #     #print(max_idx, max_val_idx, running_idx)
                     
 
             epoch_loss = running_loss / epoch_elem_size
@@ -329,6 +330,21 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
             else:
                 # print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
                 print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
+
+            if phase in ['train', 'val_train', 'val']:
+                p = ptsFromGaussian(outputs)
+                target = ptsFromGaussian(target_maps)
+                #                 p_maps = ptsFromGaussian(out_maps)
+
+                #                 plot_inp = rescaleMaps(inputs, 56, 56)
+                plt.imshow(inputs[0, 0, :, :].cpu().numpy())
+                plt.imshow(target_maps[0, 0, :, :].cpu().numpy() + target_maps[0, 1, :, :].cpu().numpy(), cmap='Reds',
+                           alpha=.5)
+                plt.scatter(p[0, :, 1], p[0, :, 0], color='red')
+                plt.scatter(target[0, :, 1], target[0, :, 0], color='blue')
+                #                 plt.scatter(p_maps[0,:,1], p_maps[0,:,0], color = 'blue')
+                plt.title(phase)
+                plt.show()
 
             if phase == 'val':
                 #Calculate specific Val accuracy
@@ -386,9 +402,9 @@ def get_config():
     cuda = 1
     # basenet = 'HRNet'
     data = {
-        'context': 1,
-        'selection_idx': 'BBD_Selection',
-        'measure_idx': 'Measure_BBD',
+        'context': 0,
+        'selection_idx': 'TCD_Selection',
+        'measure_idx': 'Measure_TCD',
         'sigma': 2.
     }
     db_params = {
@@ -396,7 +412,7 @@ def get_config():
         'seg_dir': '/media/df4-projects/Lilach/Data/seg/',
         'csv': '/media/df4-projects/Lilach/Data/data_set.xlsx',
         'quality': None,
-        'pos_neg_ratio': 2,
+        'pos_neg_ratio': 0,
         'train_test_split': 0.8,
     }
     optimizer_params = {
