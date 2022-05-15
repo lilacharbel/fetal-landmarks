@@ -187,16 +187,9 @@ class SampleFrom3D(object):
             
             else:
                 sampling_population = set(range(0, sample['image'].shape[0] - self.context))
-                # print('sampling population', sampling_population)
-                # print('sample[sample_idx]', sample[self.sample_idx])
-                # print('img', sample['Subject'], sample['SeriesNum'])
-                
                 sampling_population.remove(sample[self.sample_idx])
-                # print('sampling population', sampling_population)
                 sampling = random.sample(sampling_population, negative_slides)
-                # print('sampling', sampling)
                 sampling.append(sample[self.sample_idx])
-                # print('sampling', sampling)
 
                 #Sample + context
                 contextrange = np.arange(-self.context, self.context+1)
@@ -213,8 +206,6 @@ class SampleFrom3D(object):
                 img = torch.stack(all_images)
                 #img = sample['image'][sampling,:,:]
                 selection = torch.LongTensor([0,]*negative_slides + [1,])
-            # print('selection', selection)
-            # print('_____________________')
 
             return {'image': img, self.sample_idx: selection}
         return helper(self, sample)
