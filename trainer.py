@@ -17,13 +17,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 # for HRNet
 import sys
-sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
-import tools._init_paths
+# sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
+# import tools._init_paths
+import _init_paths
 #import models as models_hrnet
 import mod_hrnet
 from config import config
 from config import update_config
-from utils.utils import get_optimizer
+# from utils.utils import get_optimizer
+from utils import get_optimizer
 #
 
 from loader import NiftiDataset, random_split
@@ -124,8 +126,8 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                            only_tag=True,
                            tagname=data["selection_idx"],
                            transform=transforms.Compose([
-                            tfs.CreateGaussianTargets(sigma=data['sigma'], measure_names=data['measure_idx']),
-                            tfs.RandomRotate(),
+                            tfs.CreateGaussianTargets(sigma=data['sigma'], measure_name=data['measure_idx']),
+                            #tfs.RandomRotate(),
                             tfs.cropByBBox(min_upcrop=1.0, max_upcrop=1.3),
                             tfs.PadZ(data['context']),
                             tfs.Rescale((224,224)),
@@ -148,7 +150,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     test_ds.dataset = copy.copy(dataset)
     test_ds.dataset.transform = transforms.Compose([
 
-                                            tfs.CreateGaussianTargets(sigma=data['sigma'], measure_names=data['measure_idx']),
+                                            tfs.CreateGaussianTargets(sigma=data['sigma'], measure_name=data['measure_idx']),
                                             tfs.cropByBBox(min_upcrop=None, max_upcrop=None),
                                             tfs.PadZ(data['context']),
                                             tfs.Rescale((224,224)),
@@ -182,9 +184,9 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     return dataloaders
 
 @ex.capture
-def create_model(optimizer_params, basenet):
-
-    config.merge_from_file("/cls_landmark_config.yaml")
+def create_model(optimizer_params):
+    
+    config.merge_from_file("/media/df4-projects/Lilach/fetal-landmarks/cls_landmark_config.yaml")
     config['MODEL']['PRETRAINED'] = "/hrnet_w18_small_model_v2.pth"
     model_ft = mod_hrnet.get_HRnet(config)
     pretrained = "/hrnet_w18_small_model_v2.pth"
@@ -239,7 +241,6 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
     best_nme = 100
     nme = 0
 
-    plt.figure()
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -286,7 +287,8 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 
                 epoch_elem_size += inputs.size(0)
                 # zero the parameter gradients
-                optimizer.zero_grad()
+                if phase == 'train':
+                    optimizer.zero_grad()
 
                 # forward
                 # track history if only in train
@@ -294,7 +296,7 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                     _, output_maps = model(inputs)
                     
                     # _, preds = torch.max(outputs, 1)
-                    loss = criterion(outputs, labels)
+                    loss = criterion(output_maps, target_maps)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -323,47 +325,33 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
             nme = nme_batch_sum / nme_count
 
             if phase in ['val', 'val_train']:
-                epoch_choose_acc = running_choose_acc / len(dataloaders[phase])
-                epoch_choose_shift = running_shift / len(dataloaders[phase])
+                # epoch_choose_acc = running_choose_acc / len(dataloaders[phase])
+                # epoch_choose_shift = running_shift / len(dataloaders[phase])
                 # print('{} Loss: {:.4f} Acc: {:.4f} ChooseAcc {:.4f} ChooseShift {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_choose_acc, epoch_choose_shift))
                 print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
             else:
                 # print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
                 print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
 
-            if phase in ['train', 'val_train', 'val']:
-                p = ptsFromGaussian(outputs)
-                target = ptsFromGaussian(target_maps)
-                #                 p_maps = ptsFromGaussian(out_maps)
-
-                #                 plot_inp = rescaleMaps(inputs, 56, 56)
-                plt.imshow(inputs[0, 0, :, :].cpu().numpy())
-                plt.imshow(target_maps[0, 0, :, :].cpu().numpy() + target_maps[0, 1, :, :].cpu().numpy(), cmap='Reds',
-                           alpha=.5)
-                plt.scatter(p[0, :, 1], p[0, :, 0], color='red')
-                plt.scatter(target[0, :, 1], target[0, :, 0], color='blue')
-                #                 plt.scatter(p_maps[0,:,1], p_maps[0,:,0], color = 'blue')
-                plt.title(phase)
-                plt.show()
 
             if phase == 'val':
                 #Calculate specific Val accuracy
                 #Assuming BS=1 in Val
                 # _run.log_scalar('val_choose_acc', float(epoch_choose_acc))
                 # _run.log_scalar('val_choose_shift', float(epoch_choose_shift))
-                # _run.log_scalar('val_loss', float(epoch_loss))
+                _run.log_scalar('val_loss', float(epoch_loss))
                 # _run.log_scalar('val_accuracy', float(epoch_acc))
                 _run.log_scalar('val_nme', float(nme))
             elif phase == 'val_train':
                 # _run.log_scalar('vtrain_choose_acc', float(epoch_choose_acc))
                 # _run.log_scalar('vtrain_choose_shift', float(epoch_choose_shift))
-                # _run.log_scalar('vtrain_loss', float(epoch_loss))
+                _run.log_scalar('vtrain_loss', float(epoch_loss))
                 # _run.log_scalar('vtrain_accuracy', float(epoch_acc))
-                _run.log_scalar('val_nme', float(nme))
+                _run.log_scalar('vtrain_nme', float(nme))
             elif phase == 'train':
-                # _run.log_scalar('train_loss', float(epoch_loss))
+                _run.log_scalar('train_loss', float(epoch_loss))
                 # _run.log_scalar('train_accuracy', float(epoch_acc))
-                _run.log_scalar('val_nme', float(nme))
+                _run.log_scalar('train_nme', float(nme))
 
 
             # deep copy the model

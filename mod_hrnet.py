@@ -21,12 +21,14 @@ import torch._utils
 import torch.nn.functional as F
 
 import sys
-sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
-import tools._init_paths
-import models as models_hrnet
+# sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
+# import tools._init_paths
+import _init_paths
+# import models as models_hrnet
 from config import config
 from config import update_config
-from utils.utils import get_optimizer
+# from utils.utils import get_optimizer
+from utils import get_optimizer
 
 
 BatchNorm2d = nn.BatchNorm2d
