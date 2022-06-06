@@ -86,7 +86,6 @@ def ptsFromGaussian(maps):
 
     for i in range(M):
         for j in range(N):
-            map_gaus = maps[i, j, :, :]
             pts[i, j, 0] = np.argmax(np.amax(maps[i, j, :, :], 1))
             pts[i, j, 1] = np.argmax(np.amax(maps[i, j, :, :], 0))
 
@@ -295,8 +294,12 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 with torch.set_grad_enabled(phase == 'train'):
                     _, output_maps = model(inputs)
                     
+
+                    # take only positive slices
+                    slice_idxs = np.nonzero(labels)[:,0].cpu().numpy()
+
                     # _, preds = torch.max(outputs, 1)
-                    loss = criterion(output_maps, target_maps)
+                    loss = criterion(output_maps[slice_idxs,:,:,:], target_maps)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
