@@ -195,8 +195,8 @@ def create_model(optimizer_params):
     model_ft.classifier = nn.Linear(num_ftrs, 2)
 
 
-    # criterion = nn.CrossEntropyLoss()
-    criterion = nn.MSELoss(size_average=True)
+    criterion_cls = nn.CrossEntropyLoss()
+    criterion_lm = nn.MSELoss(size_average=True)
 
     # Observe that all parameters are being optimized
     # optimizer_ft = optim.SGD(model_ft.parameters(), lr=optimizer_params['lr'], momentum=optimizer_params['momentum'])
@@ -224,10 +224,10 @@ def create_model(optimizer_params):
 
     # ####
 
-    return model_ft, criterion, optimizer_ft, exp_lr_scheduler
+    return model_ft, criterion_cls, criterion_lm, optimizer_ft, exp_lr_scheduler
 
 @ex.capture
-def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run, num_epochs, optimizer_params):
+def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, dataloaders, device,_run, num_epochs, optimizer_params):
     since = time.time()
     run_dir = os.path.join(save_dir, str(_run._id))
     os.makedirs(run_dir, exist_ok=True)
@@ -269,8 +269,8 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
 
             running_loss = 0.0
             running_corrects = 0
-            # running_choose_acc = 0.0
-            # running_shift = 0.0
+            running_choose_acc = 0.0
+            running_shift = 0.0
 
             nme_count = 0
             nme_batch_sum = 0
@@ -292,14 +292,14 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    _, output_maps = model(inputs)
+                    outputs, output_maps = model(inputs)
                     
 
                     # take only positive slices
                     slice_idxs = np.nonzero(labels)[:,0].cpu().numpy()
 
-                    # _, preds = torch.max(outputs, 1)
-                    loss = criterion(output_maps[slice_idxs,:,:,:], target_maps)
+                    _, preds = torch.max(outputs, 1)
+                    loss = (criterion_lm(output_maps[slice_idxs,:,:,:], target_maps) + criterion_cls(outputs, labels))/2
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -308,52 +308,52 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                # running_corrects += torch.sum(preds == labels.data)
+                running_corrects += torch.sum(preds == labels.data)
 
                 nme_temp = compute_nme(output_maps, target_maps)
                 nme_batch_sum += np.sum(nme_temp)
                 nme_count = nme_count + output_maps.size(0)
 
-                # if phase in ['val', 'val_train']:
-                #     output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
-                #     max_val, max_idx = torch.max(output_sfmax[:,1],dim=0)
-                #     max_val_lbl, max_val_idx = torch.max(labels.data,dim=0)
-                #     running_choose_acc += (1. - (abs(float(max_idx) - float(max_val_idx))/float(inputs.size(0))))
-                #     running_shift += abs(float(max_idx) - float(max_val_idx))
-                #     #print(max_idx, max_val_idx, running_idx)
+                if phase in ['val', 'val_train']:
+                    output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
+                    max_val, max_idx = torch.max(output_sfmax[:,1],dim=0)
+                    max_val_lbl, max_val_idx = torch.max(labels.data,dim=0)
+                    running_choose_acc += (1. - (abs(float(max_idx) - float(max_val_idx))/float(inputs.size(0))))
+                    running_shift += abs(float(max_idx) - float(max_val_idx))
+                    #print(max_idx, max_val_idx, running_idx)
                     
 
             epoch_loss = running_loss / epoch_elem_size
-            # epoch_acc = running_corrects.double() / epoch_elem_size
+            epoch_acc = running_corrects.double() / epoch_elem_size
             nme = nme_batch_sum / nme_count
 
             if phase in ['val', 'val_train']:
-                # epoch_choose_acc = running_choose_acc / len(dataloaders[phase])
-                # epoch_choose_shift = running_shift / len(dataloaders[phase])
-                # print('{} Loss: {:.4f} Acc: {:.4f} ChooseAcc {:.4f} ChooseShift {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_choose_acc, epoch_choose_shift))
-                print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
+                epoch_choose_acc = running_choose_acc / len(dataloaders[phase])
+                epoch_choose_shift = running_shift / len(dataloaders[phase])
+                print('{} Loss: {:.4f} NME: {:.4f} Acc: {:.4f} ChooseAcc {:.4f} ChooseShift {:.4f}'.format(phase, epoch_loss, nme, epoch_acc, epoch_choose_acc, epoch_choose_shift))
+                # print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
             else:
-                # print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
-                print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
+                print('{} Loss: {:.4f} NME: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, nme, epoch_acc))
+                # print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
 
 
             if phase == 'val':
-                #Calculate specific Val accuracy
-                #Assuming BS=1 in Val
-                # _run.log_scalar('val_choose_acc', float(epoch_choose_acc))
-                # _run.log_scalar('val_choose_shift', float(epoch_choose_shift))
+                # Calculate specific Val accuracy
+                # Assuming BS=1 in Val
+                _run.log_scalar('val_choose_acc', float(epoch_choose_acc))
+                _run.log_scalar('val_choose_shift', float(epoch_choose_shift))
                 _run.log_scalar('val_loss', float(epoch_loss))
-                # _run.log_scalar('val_accuracy', float(epoch_acc))
+                _run.log_scalar('val_accuracy', float(epoch_acc))
                 _run.log_scalar('val_nme', float(nme))
             elif phase == 'val_train':
-                # _run.log_scalar('vtrain_choose_acc', float(epoch_choose_acc))
-                # _run.log_scalar('vtrain_choose_shift', float(epoch_choose_shift))
+                _run.log_scalar('vtrain_choose_acc', float(epoch_choose_acc))
+                _run.log_scalar('vtrain_choose_shift', float(epoch_choose_shift))
                 _run.log_scalar('vtrain_loss', float(epoch_loss))
-                # _run.log_scalar('vtrain_accuracy', float(epoch_acc))
+                _run.log_scalar('vtrain_accuracy', float(epoch_acc))
                 _run.log_scalar('vtrain_nme', float(nme))
             elif phase == 'train':
                 _run.log_scalar('train_loss', float(epoch_loss))
-                # _run.log_scalar('train_accuracy', float(epoch_acc))
+                _run.log_scalar('train_accuracy', float(epoch_acc))
                 _run.log_scalar('train_nme', float(nme))
 
 
@@ -370,7 +370,7 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, device,_run
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
-    # print('Best val Acc: {:4f}'.format(best_acc))
+    print('Best val Acc: {:4f}'.format(best_acc))
     print('Best nme: {:4f}'.format(best_nme))
 
     # Save last epoch model
@@ -458,8 +458,8 @@ def main():
     device = create_device()
     dataloaders = create_dataloaders()
 
-    model, criterion, optimizer, scheduler = create_model()
-    model = train_model(model, criterion, optimizer, scheduler, dataloaders, device)
+    model, criterion_cls, criterion_lm, optimizer, scheduler = create_model()
+    model = train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, dataloaders, device)
     
 
 if __name__ == '__main__':
