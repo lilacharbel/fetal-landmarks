@@ -3,3 +3,6 @@ models
 runs
 __pycache__
 .idea
+debug.profile
+degug.pyprof
+notebooks
