@@ -15,6 +15,7 @@ import copy
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 # for HRNet
 import sys
 # sys.path.append("/media/df4-projects/Lilach/HRNet-Image-Classification")
@@ -35,6 +36,8 @@ from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import MongoObserver
 
+from sklearn.mixture import GaussianMixture
+
 save_dir = os.path.join(".", "models")
 
 writer = SummaryWriter('runs')
@@ -50,7 +53,7 @@ def getTimeName():
     t = datetime.now()
     return "{:02d}-{:02d}_{:02d}{:02d}".format(t.day,t.month,t.hour,t.minute)
 
-def save_model(model, epoch, directory, metrics, filename=None):
+def save_model(model, epoch, directory, metrics, val_data, filename=None):
     """Save the state dict of the model in the directory,
     with the save name metrics at the given epoch.
     epoch: epoch number(<= 4 digits)
@@ -65,7 +68,11 @@ def save_model(model, epoch, directory, metrics, filename=None):
         filename = f"epoch{epoch:04d}_{getTimeName()}_"
         postfix = "_".join([f"{name}{val:0.4f}" for name, val in metrics.items()])
 
+    valdata_name = os.path.join(directory, filename + postfix + "_val_data.csv")
     filename = os.path.join(directory, filename + postfix + ".statedict.pkl")
+    
+    print('filename:', filename)
+    print('valdata_name:', valdata_name)
 
     if isinstance(model, nn.DataParallel):
         state = model.module.state_dict()
@@ -73,6 +80,8 @@ def save_model(model, epoch, directory, metrics, filename=None):
         state = model.state_dict()
 
     torch.save(state, filename)
+    val_data.to_csv(valdata_name)
+
     print(f"Saved model at {filename}")
 
     return filename
@@ -106,6 +115,39 @@ def compute_nme(preds, targets):
     return rmse
 
 
+def determine_direction(pts_arr, do_plot=False):
+    gmm = GaussianMixture(n_components=2)
+    gmm.fit(pts_arr)
+    if do_plot:
+        plt.scatter(pts_arr[::2,0], pts_arr[::2,1], alpha=.1)
+        plt.scatter(pts_arr[1::2,0], pts_arr[1::2,1], color='r',alpha=.1)
+        plt.plot(gmm.means_[:,0], gmm.means_[:,1], color='k')
+        plt.xlim([0,1])
+        plt.ylim([0,1])
+        plt.show()
+    return gmm.means_
+
+
+def classify_direction(target_maps, d_pts):
+    target_dim = target_maps.size()
+    
+    pts_arr = ptsFromGaussian(target_maps)
+    d_vector = d_pts[1, :] - d_pts[0, :]
+
+    ap = pts_arr  
+    pt_part1 = np.dot(d_vector[np.newaxis, :], ap.T) / np.linalg.norm(d_vector)
+    pts_class = pt_part1.flatten()
+    pts_class = pts_class.reshape(-1, 2)
+    pts_class = np.stack((np.argmin(pts_class, axis=1), np.argmax(pts_class, axis=1)), axis=1) 
+    
+    pts_remap = np.concatenate((np.sort(np.tile(np.arange(pts_class.shape[0]),2)) , np.reshape(pts_class, (-1))), axis=0)
+    pts_remap = np.transpose(np.reshape(pts_remap, (-1,target_maps.shape[0]*target_maps.shape[1])))
+    target_maps = target_maps[pts_remap[:, 0],pts_remap[:,1]]
+    target_maps = np.reshape(target_maps, target_dim)
+    
+    return target_maps
+
+
 @ex.capture
 def create_dataloaders(cuda, batch_size, db_params, data):
     #Input validation
@@ -115,7 +157,6 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     if not os.path.isdir(db_params['root_dir']):
         raise ValueError('Root dir for DB does not exists {}'.format(db_params['root_dir']))
     #Dataloader creation
-
 
     kwargs = {'num_workers': 4, 'pin_memory': True} if cuda in [0,1] else {}
     dataset = NiftiDataset(csv_file=db_params['csv'],
@@ -227,7 +268,7 @@ def create_model(optimizer_params):
     return model_ft, criterion_cls, criterion_lm, optimizer_ft, exp_lr_scheduler
 
 @ex.capture
-def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, dataloaders, device,_run, num_epochs, optimizer_params):
+def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, dataloaders, device, _run, num_epochs, optimizer_params, data):
     since = time.time()
     run_dir = os.path.join(save_dir, str(_run._id))
     os.makedirs(run_dir, exist_ok=True)
@@ -235,11 +276,41 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
     best_model_epoch = 0
-
     best_loss = 100
     best_nme = 100
     nme = 0
 
+    # find d_vector
+    data_table = dataloaders['train'].dataset.dataset.metadata
+    train_idx = dataloaders['train'].dataset.indices
+    train_data = data_table.iloc[train_idx]
+    
+    columns_to_ids = ["_X1", "_X2", "_Y1", "_Y2"]
+    measure_names = [data['measure_idx'] + a for a in columns_to_ids]
+    measure_names_idx = [train_data.columns.get_loc(col) for col in measure_names]
+
+    allpts = []
+    for idx, l in train_data.iterrows():
+
+        # filename = "Pat{patient_id:02}_Se{series:02}_Res{res_x}_{res_y}_Spac{res_z:.1f}.nii"
+        # fn = filename.format(patient_id=l["Subject"],
+        #                     series=l["SeriesNum"],
+        #                     res_x=l["resX"],
+        #                     res_y=l["resY"],
+        #                     res_z=l["resZ"],)
+
+        # img_name = os.path.join(db_params['root_dir'], fn)
+        # image = nibabel.load(img_name).get_fdata().astype(np.float)
+        # f_dim = image.shape[:-1][::-1]
+        f_dim = (512, 512)
+        
+        pts = l[measure_names_idx].values
+        
+        pts = pts.astype('float').reshape(-1, 2) / f_dim
+        allpts.append(pts)
+
+    allpts = np.concatenate(allpts)
+    d_vector = determine_direction(allpts, do_plot=True)
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -282,8 +353,9 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-                target_maps = target_maps.to(device).float()
-                
+                # target_maps = target_maps.to(device).float()
+                target_maps = classify_direction(target_maps, d_vector).to(device).float()
+
                 epoch_elem_size += inputs.size(0)
                 # zero the parameter gradients
                 if phase == 'train':
@@ -373,16 +445,20 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
     print('Best val Acc: {:4f}'.format(best_acc))
     print('Best nme: {:4f}'.format(best_nme))
 
+    # save the validation set
+    val_idx = dataloaders['val'].dataset.indices
+    val_data = data_table.iloc[val_idx]
+
     # Save last epoch model
     # model_fname = save_model(model, epoch, run_dir, {'choose_acc' : epoch_choose_acc})
-    model_fname = save_model(model, epoch, run_dir, {'nme': nme})
+    model_fname = save_model(model, epoch, run_dir, {'nme': nme}, val_data)
     _run.add_artifact(model_fname, "model_lastepoch")
 
     # load best model weights
     model.load_state_dict(best_model_wts)
 
     # model_fname = save_model(model, best_model_epoch, run_dir, {'choose_acc' : best_acc})
-    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme})
+    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme}, val_data)
     _run.add_artifact(model_fname, "model")
     return model
 
