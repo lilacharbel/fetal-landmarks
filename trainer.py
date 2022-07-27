@@ -68,7 +68,7 @@ def save_model(model, epoch, directory, metrics, val_data, filename=None):
         filename = f"epoch{epoch:04d}_{getTimeName()}_"
         postfix = "_".join([f"{name}{val:0.4f}" for name, val in metrics.items()])
 
-    valdata_name = os.path.join(directory, filename + postfix + "_val_data.csv")
+    valdata_name = os.path.join(directory, filename + postfix + "_val_data.xlsx")
     filename = os.path.join(directory, filename + postfix + ".statedict.pkl")
     
     print('filename:', filename)
@@ -80,7 +80,7 @@ def save_model(model, epoch, directory, metrics, val_data, filename=None):
         state = model.state_dict()
 
     torch.save(state, filename)
-    val_data.to_csv(valdata_name)
+    val_data.to_excel(valdata_name)
 
     print(f"Saved model at {filename}")
 
@@ -198,7 +198,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                                             tfs.ToTensor(),
                                             tfs.Normalize(mean=0.456,
                                                             std=0.224),
-                                            tfs.SampleFrom3D(0,
+                                            tfs.SampleFrom3D(None,
                                                              sample_idx=data['selection_idx'],
                                                              context=data['context']),
                                             #tfs.RandomFlip(),
@@ -369,7 +369,6 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
 
                     # take only positive slices
                     slice_idxs = np.nonzero(labels)[:,0].cpu().numpy()
-
                     _, preds = torch.max(outputs, 1)
                     loss = (criterion_lm(output_maps[slice_idxs,:,:,:], target_maps) + criterion_cls(outputs, labels))/2
 
@@ -382,7 +381,7 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
 
-                nme_temp = compute_nme(output_maps, target_maps)
+                nme_temp = compute_nme(output_maps[slice_idxs,:,:,:], target_maps)
                 nme_batch_sum += np.sum(nme_temp)
                 nme_count = nme_count + output_maps.size(0)
 
@@ -479,7 +478,7 @@ def get_config():
         'seg_dir': '/media/df4-projects/Lilach/Data/seg/',
         'csv': '/media/df4-projects/Lilach/Data/data_set.xlsx',
         'quality': None,
-        'pos_neg_ratio': 0,
+        'pos_neg_ratio': 2,
         'train_test_split': 0.8,
     }
     optimizer_params = {
