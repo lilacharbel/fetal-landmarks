@@ -14,9 +14,10 @@ from trainer import create_model, create_device, ptsFromGaussian
 from loader import NiftiDataset, random_split
 import transforms as tfs
 
-model_path = '../fetal-landmarks/models/99/epoch0006_27-07_1529_nme2.6885'
+model_path = '../fetal-landmarks/models/99/epoch0024_27-07_1529_nme2.6885'
 path_split = model_path.split('/')
 fig_dir = '/'.join(path_split[:-1])+'/plots/'
+stats_file_dir = '/'.join(path_split[:-1])+'/stats.xlsx'
 
 # config
 batch_size = 6
@@ -98,90 +99,94 @@ val_data = val_data.drop(['level_0', 'Unnamed: 0', 'Unnamed: 0.1'], axis=1)
 val_idx = val_data.index
 
 
-# find landmarks of test data
-model.eval()
+# measurements of validation
+with torch.no_grad():
+    model.eval()
 
-i=0
+    i=0
 
-for inputs, labels, target_maps in dataloaders:
-    inputs = inputs.to(device)
-    labels = labels.to(device)
-    target_maps = target_maps.to(device).float()
-    
-    index = val_idx[i]
-    print('index:', index)
-    
-    TCD_slice = np.nonzero(labels)[:,0].cpu().numpy()
-    TCD_slice = TCD_slice[0]-1
-    print('TCD_slice:', TCD_slice)
-    
-    pix_len = val_data.loc[index,'resX']
-    print('pix_len:', pix_len)
-    
-    TCD = val_data.loc[index,'TCD']
-    print('TCD:', TCD)
-    
-    
-    outputs, out_maps = model(inputs)
-    
-    output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
-    _, TCD_slice_pred = torch.max(output_sfmax[:,1],dim=0)
-    TCD_slice_pred = TCD_slice_pred.cpu().numpy()
-    print('TCD_slice_pred:', TCD_slice_pred)
+    for inputs, labels, target_maps in dataloaders:
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+        target_maps = target_maps.to(device).float()
+        
+        index = val_idx[i]
+        print('index:', index)
+        
+        _, TCD_slice = torch.max(labels.data,dim=0)
+        print('TCD_slice:', TCD_slice)
+        
+        pix_len = val_data.loc[index,'resX']
+        print('pix_len:', pix_len)
+        
+        TCD = val_data.loc[index,'TCD']
+        print('TCD:', TCD)
+        
+        targets = ptsFromGaussian(target_maps) * pix_len
+        targets = targets[0]
+        
+        TCD_calc = scipy.spatial.distance.euclidean(targets[0,:], targets[1,:]) 
+        print('TCD_calc:', TCD_calc)
+        
+        factor = TCD/ TCD_calc
+        print('factor:', factor)
 
-    preds = ptsFromGaussian(out_maps) * pix_len
-    targets = ptsFromGaussian(target_maps) * pix_len
-    
-    
-    TCD_calc = scipy.spatial.distance.euclidean(targets[0,0,:], targets[0,1,:]) 
-    print('TCD_calc:', TCD_calc)
-    
-    factor = TCD/ TCD_calc
-    print('factor:', factor)
-    
-    TCD_pred = scipy.spatial.distance.euclidean(preds[0,0,:], preds[0,1,:]) * factor
-    print('TCD_pred:', TCD_pred)
-    
-    
-    d = {'index':index, 'TCD_slice':TCD_slice, 'TCD_slice_pred':TCD_slice_pred, 'slice_shift':TCD_slice_pred-TCD_slice, 'targets':targets, 'preds':preds, 'TCD':TCD, 'TCD_pred':TCD_pred, 'TCD diff':TCD_pred-TCD}
-    
-    if i==0:
-        df = pd.DataFrame([d])
-    else:
-        df = df.append([d], ignore_index = True)
-    
-    plt.figure()
-    plt.ion()
-    plt.imshow(inputs[TCD_slice,0,:,:].cpu().numpy())
-    plt.plot(targets[0,:,1]/pix_len, targets[0,:,0]/pix_len, color = 'blue')
-    plt.plot(preds[0,:,1]/pix_len, preds[0,:,0]/pix_len, color = 'red')
-    plt.title('Targets = Blue, Predictions = Red')
-    plt.ioff()
+        # find predictions
 
-    # plt.show()
-    
-    fig_name = 'val{}.png'.format(i)
-    if not os.path.exists(fig_dir):
-        os.makedirs(fig_dir)
-    plt.savefig(fig_dir+fig_name)
+        outputs, out_maps = model(inputs)
+        
+        output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
+        _, TCD_slice_pred = torch.max(output_sfmax[:,1],dim=0)
+        print('TCD_slice_pred:', TCD_slice_pred)
 
-    i += 1 
+        TCD_slice_shift = abs(float(TCD_slice_pred) - float(TCD_slice))
+        print('TCD_slice_shift:', TCD_slice_shift)
+
+        preds = ptsFromGaussian(out_maps) * pix_len
+        presd_pos = preds[TCD_slice,:,:]
+
+        TCD_pred = scipy.spatial.distance.euclidean(preds[0,0,:], preds[0,1,:]) * factor
+        print('TCD_pred:', TCD_pred)
+        print('------------------------------------\n')
+        
+        d = {'index':index, 'TCD_slice':TCD_slice, 'TCD_slice_pred':TCD_slice_pred, 'slice_shift':TCD_slice_shift, 'targets':targets, 'preds':preds, 'preds pos slice:': presd_pos, 'TCD':TCD, 'TCD_pred':TCD_pred, 'TCD diff':TCD_pred-TCD}
+        
+        if i==0:
+            df = pd.DataFrame([d])
+        else:
+            df = df.append([d], ignore_index = True)
+        
+        plt.figure()
+        plt.ion()
+        plt.imshow(inputs[TCD_slice,0,:,:].cpu().numpy())
+        plt.plot(targets[:,1]/pix_len, targets[:,0]/pix_len, color = 'blue')
+        plt.plot(presd_pos[:,1]/pix_len, presd_pos[:,0]/pix_len, color = 'red')
+        plt.title('Targets = Blue, Predictions = Red')
+        plt.ioff()
+
+        # plt.show()
+        
+        fig_name = 'val{}.png'.format(index)
+        if not os.path.exists(fig_dir):
+            os.makedirs(fig_dir)
+        plt.savefig(fig_dir+fig_name)
+
+        i += 1 
 
 # save df
-df.to_excel('../stats.xlsx')
+df.to_excel(stats_file_dir)
 
-# bland altman
-plt.figure()
-plt.ion()
-plt.scatter((df['TCD'] + df['TCD_pred'])/2., df['TCD'] - df['TCD_pred'])
-plt.title('Bland Altman')
-plt.ioff()
-plt.savefig(fig_dir+'bland_altman.png')
-# plt.show()
+# # bland altman
+# plt.figure()
+# plt.ion()
+# plt.scatter((df['TCD'] + df['TCD_pred'])/2., df['TCD'] - df['TCD_pred'])
+# plt.title('Bland Altman')
+# plt.ioff()
+# plt.savefig(fig_dir+'bland_altman.png')
+# # plt.show()
 
 plt.figure()
 plt.ion()
 sm.graphics.mean_diff_plot(df['TCD'], df['TCD_pred'])
-plt.title('Bland Altman')
 plt.ioff()
-plt.savefig(fig_dir+'bland_altman2.png')
+plt.savefig(fig_dir+'bland_altman.png')

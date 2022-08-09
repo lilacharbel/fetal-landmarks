@@ -109,8 +109,9 @@ def compute_nme(preds, targets):
     L = preds.shape[1]  # number of points = 2
     rmse = np.zeros(N)
 
-    for i in range(N):
-        rmse[i] = np.sum(np.linalg.norm(preds_pts - targets_pts, axis=1)) / L
+    # for i in range(N):
+    #     rmse[i] = np.sum(np.linalg.norm(preds_pts - targets_pts, axis=1)) / L
+    rmse = np.mean(np.linalg.norm(preds_pts - targets_pts, axis=2))
 
     return rmse
 
@@ -167,8 +168,8 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                            tagname=data["selection_idx"],
                            transform=transforms.Compose([
                             tfs.CreateGaussianTargets(sigma=data['sigma'], measure_name=data['measure_idx']),
-                            #tfs.RandomRotate(),
-                            tfs.cropByBBox(min_upcrop=1.0, max_upcrop=1.3),
+                            tfs.RandomRotate(),
+                            tfs.cropByBBox(min_upcrop=1.3, max_upcrop=1.3),
                             tfs.PadZ(data['context']),
                             tfs.Rescale((224,224)),
 
@@ -382,8 +383,8 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 running_corrects += torch.sum(preds == labels.data)
 
                 nme_temp = compute_nme(output_maps[slice_idxs,:,:,:], target_maps)
-                nme_batch_sum += np.sum(nme_temp)
-                nme_count = nme_count + output_maps.size(0)
+                nme_batch_sum += nme_temp
+                nme_count += 1
 
                 if phase in ['val', 'val_train']:
                     output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
@@ -393,7 +394,6 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                     running_shift += abs(float(max_idx) - float(max_val_idx))
                     #print(max_idx, max_val_idx, running_idx)
                     
-
             epoch_loss = running_loss / epoch_elem_size
             epoch_acc = running_corrects.double() / epoch_elem_size
             nme = nme_batch_sum / nme_count
@@ -430,9 +430,9 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
 
             # deep copy the model
             # if phase == 'val' and epoch_choose_acc > best_acc:
-            if phase == 'val' and nme < best_nme:
-                # best_acc = epoch_choose_acc
+            if phase == 'val' and nme <= best_nme and epoch_choose_acc >= best_acc:
                 best_nme = nme
+                best_acc = epoch_choose_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
                 best_model_epoch = epoch
             if phase == 'train':
@@ -464,9 +464,8 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
 @ex.config
 def get_config():
     batch_size = 6
-    num_epochs = 25
+    num_epochs = 200
     cuda = 1
-    # basenet = 'HRNet'
     data = {
         'context': 0,
         'selection_idx': 'TCD_Selection',
