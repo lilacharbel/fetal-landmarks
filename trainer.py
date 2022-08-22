@@ -53,7 +53,16 @@ def getTimeName():
     t = datetime.now()
     return "{:02d}-{:02d}_{:02d}{:02d}".format(t.day,t.month,t.hour,t.minute)
 
-def save_model(model, epoch, directory, metrics, val_data, filename=None):
+def exp_params_to_txt(batch_size, num_epochs, data, db_params, optimizer_params, params_dir):
+    param_file = open(params_dir,'w')
+    param_file.write('batch = {}, epochs = {} \n'
+    'data: {} \n'
+    'db_params: {} \n'
+    'optimizer_params: {}'. format(batch_size, num_epochs, str(data), str(db_params), str(optimizer_params)))
+    param_file.close()
+
+
+def save_model(model, epoch, directory, metrics, val_data, batch_size, num_epochs, data, db_params, optimizer_params, filename=None):
     """Save the state dict of the model in the directory,
     with the save name metrics at the given epoch.
     epoch: epoch number(<= 4 digits)
@@ -69,10 +78,11 @@ def save_model(model, epoch, directory, metrics, val_data, filename=None):
         postfix = "_".join([f"{name}{val:0.4f}" for name, val in metrics.items()])
 
     valdata_name = os.path.join(directory, filename + postfix + "_val_data.xlsx")
+    params_name = os.path.join(directory, filename + postfix + "_exp_params.txt")
     filename = os.path.join(directory, filename + postfix + ".statedict.pkl")
     
     print('filename:', filename)
-    print('valdata_name:', valdata_name)
+    # print('valdata_name:', valdata_name)
 
     if isinstance(model, nn.DataParallel):
         state = model.module.state_dict()
@@ -81,6 +91,7 @@ def save_model(model, epoch, directory, metrics, val_data, filename=None):
 
     torch.save(state, filename)
     val_data.to_excel(valdata_name)
+    exp_params_to_txt(batch_size, num_epochs, data, db_params, optimizer_params, params_name)
 
     print(f"Saved model at {filename}")
 
@@ -105,15 +116,14 @@ def compute_nme(preds, targets):
     preds_pts = ptsFromGaussian(preds)
     targets_pts = ptsFromGaussian(targets)
 
-    N = preds.shape[0]  # number of slices
-    L = preds.shape[1]  # number of points = 2
-    rmse = np.zeros(N)
-
-    # for i in range(N):
-    #     rmse[i] = np.sum(np.linalg.norm(preds_pts - targets_pts, axis=1)) / L
-    rmse = np.mean(np.linalg.norm(preds_pts - targets_pts, axis=2))
-
-    return rmse
+    rmse = np.mean(np.linalg.norm(preds_pts - targets_pts, axis=2), axis=1)
+    rmse_v2 = np.mean(np.linalg.norm(preds_pts - targets_pts[:,::-1,:], axis=2), axis=1)
+    rmse_total = np.min([rmse, rmse_v2], axis=0)
+    
+    # rmse = np.mean(np.linalg.norm(preds_pts - targets_pts, axis=2))
+    # rmse_v2 = np.mean(np.linalg.norm(preds_pts - targets_pts[:,::-1,:], axis=2)) 
+    # rmse_total = np.min((rmse, rmse_v2))
+    return np.mean(rmse_total) #rmse_total
 
 
 def determine_direction(pts_arr, do_plot=False):
@@ -169,7 +179,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
                            transform=transforms.Compose([
                             tfs.CreateGaussianTargets(sigma=data['sigma'], measure_name=data['measure_idx']),
                             tfs.RandomRotate(),
-                            tfs.cropByBBox(min_upcrop=1.3, max_upcrop=1.3),
+                            tfs.cropByBBox(min_upcrop=1.0, max_upcrop=1.3),
                             tfs.PadZ(data['context']),
                             tfs.Rescale((224,224)),
 
@@ -186,6 +196,8 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     train_size = int(db_params['train_test_split'] * dataset_size)
     test_size = dataset_size - train_size
     (train_ds, test_ds) , (train_idx, test_idx) = random_split(dataset, [train_size, test_size])
+
+
 
     #It is not going to be elegant.... special augmentation for test
     test_ds.dataset = copy.copy(dataset)
@@ -221,7 +233,7 @@ def create_dataloaders(cuda, batch_size, db_params, data):
     dataloaders = {}
     dataloaders["train"] = train_loader
     dataloaders["val"] = test_loader
-    dataloaders["val_train"] = train_val_loader
+    dataloaders["val_train"] = train_val_loader #copy.copy(test_loader)
     return dataloaders
 
 @ex.capture
@@ -269,7 +281,7 @@ def create_model(optimizer_params):
     return model_ft, criterion_cls, criterion_lm, optimizer_ft, exp_lr_scheduler
 
 @ex.capture
-def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, dataloaders, device, _run, num_epochs, optimizer_params, data):
+def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, dataloaders, device, _run, num_epochs, optimizer_params, data, db_params, batch_size):
     since = time.time()
     run_dir = os.path.join(save_dir, str(_run._id))
     os.makedirs(run_dir, exist_ok=True)
@@ -311,7 +323,7 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
         allpts.append(pts)
 
     allpts = np.concatenate(allpts)
-    d_vector = determine_direction(allpts, do_plot=True)
+    d_vector = determine_direction(allpts, do_plot=False)
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -345,7 +357,7 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
             running_shift = 0.0
 
             nme_count = 0
-            nme_batch_sum = 0
+            nme_sum = 0
             nme = 0
 
             epoch_elem_size = 0
@@ -366,12 +378,22 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs, output_maps = model(inputs)
-                    
 
                     # take only positive slices
                     slice_idxs = np.nonzero(labels)[:,0].cpu().numpy()
                     _, preds = torch.max(outputs, 1)
-                    loss = (criterion_lm(output_maps[slice_idxs,:,:,:], target_maps) + criterion_cls(outputs, labels))/2
+
+                    # normalization factor for landmarks loss
+                    a = (np.pi * data['sigma']**2) / (target_maps.size(2)*target_maps.size(3))
+                    selec_loss = criterion_cls(outputs, labels)
+                    lm_loss = criterion_lm(output_maps[slice_idxs,:,:,:], target_maps) / a
+
+                    # print('selection loss:', selec_loss)
+                    # print('landmarks loss before:', criterion_lm(output_maps[slice_idxs,:,:,:], target_maps))
+                    # print('landmarks loss after:', lm_loss)
+                    # print('**')
+                    # loss = (criterion_lm(output_maps[slice_idxs,:,:,:], target_maps) + criterion_cls(outputs, labels))/2
+                    loss = (selec_loss + lm_loss) / (1 + (1/a))
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -383,8 +405,9 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 running_corrects += torch.sum(preds == labels.data)
 
                 nme_temp = compute_nme(output_maps[slice_idxs,:,:,:], target_maps)
-                nme_batch_sum += nme_temp
+                nme_sum += nme_temp
                 nme_count += 1
+
 
                 if phase in ['val', 'val_train']:
                     output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
@@ -396,7 +419,7 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                     
             epoch_loss = running_loss / epoch_elem_size
             epoch_acc = running_corrects.double() / epoch_elem_size
-            nme = nme_batch_sum / nme_count
+            nme = nme_sum / nme_count
 
             if phase in ['val', 'val_train']:
                 epoch_choose_acc = running_choose_acc / len(dataloaders[phase])
@@ -407,6 +430,17 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 print('{} Loss: {:.4f} NME: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, nme, epoch_acc))
                 # print('{} Loss: {:.4f}  NME: {:.4f}'.format(phase, epoch_loss, nme))
 
+            # # plot
+            # preds_pts = ptsFromGaussian(output_maps)
+            # target_pts = ptsFromGaussian(target_maps)
+ 
+            # plt.imshow(inputs[slice_idxs[0], 0, :, :].cpu().numpy(), cmap='Greys_r')
+            # plt.imshow(target_maps[0, 0, :, :].cpu().numpy() + target_maps[0, 1, :, :].cpu().numpy(), cmap='Reds',
+            #             alpha=.5)
+            # plt.scatter(preds_pts[slice_idxs[0], :, 1], preds_pts[slice_idxs[0], :, 0], color='red')
+            # plt.scatter(target_pts[0, :, 1], target_pts[0, :, 0], color='blue')
+            # plt.title('{} \n target: {} \n pred: {} \n nme: {}'.format(phase, target_pts, preds_pts[slice_idxs[0]], nme_temp))
+            # plt.show()
 
             if phase == 'val':
                 # Calculate specific Val accuracy
@@ -430,7 +464,7 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
 
             # deep copy the model
             # if phase == 'val' and epoch_choose_acc > best_acc:
-            if phase == 'val' and nme <= best_nme and epoch_choose_acc >= best_acc:
+            if phase == 'val' and nme < best_nme: #and epoch_choose_acc >= best_acc:
                 best_nme = nme
                 best_acc = epoch_choose_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
@@ -450,14 +484,14 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
 
     # Save last epoch model
     # model_fname = save_model(model, epoch, run_dir, {'choose_acc' : epoch_choose_acc})
-    model_fname = save_model(model, epoch, run_dir, {'nme': nme}, val_data)
+    model_fname = save_model(model, epoch, run_dir, {'nme': nme}, val_data, batch_size, num_epochs, data, db_params, optimizer_params)
     _run.add_artifact(model_fname, "model_lastepoch")
 
     # load best model weights
     model.load_state_dict(best_model_wts)
-
+    
     # model_fname = save_model(model, best_model_epoch, run_dir, {'choose_acc' : best_acc})
-    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme}, val_data)
+    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme}, val_data, batch_size, num_epochs, data, db_params, optimizer_params)
     _run.add_artifact(model_fname, "model")
     return model
 

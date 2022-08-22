@@ -14,7 +14,13 @@ from trainer import create_model, create_device, ptsFromGaussian
 from loader import NiftiDataset, random_split
 import transforms as tfs
 
-model_path = '../fetal-landmarks/models/99/epoch0024_27-07_1529_nme2.6885'
+#################################
+##### experiment parameters #####
+#################################
+model_path = '../fetal-landmarks/models/152/epoch0199_18-08_0825_nme6.8269'
+measure = 'TCD'
+
+
 path_split = model_path.split('/')
 fig_dir = '/'.join(path_split[:-1])+'/plots/'
 stats_file_dir = '/'.join(path_split[:-1])+'/stats.xlsx'
@@ -22,12 +28,12 @@ stats_file_dir = '/'.join(path_split[:-1])+'/stats.xlsx'
 # config
 batch_size = 6
 num_epochs = 25
-cuda = 1
+cuda = 0
 # basenet = 'HRNet'
 data = {
     'context': 0,
-    'selection_idx': 'TCD_Selection',
-    'measure_idx': 'Measure_TCD',
+    'selection_idx': measure+'_Selection',
+    'measure_idx': 'Measure_'+measure,
     'sigma': 2.
 }
 db_params = {
@@ -113,22 +119,22 @@ with torch.no_grad():
         index = val_idx[i]
         print('index:', index)
         
-        _, TCD_slice = torch.max(labels.data,dim=0)
-        print('TCD_slice:', TCD_slice)
+        _, target_slice = torch.max(labels.data,dim=0)
+        print(measure+'_slice:', target_slice)
         
         pix_len = val_data.loc[index,'resX']
         print('pix_len:', pix_len)
         
-        TCD = val_data.loc[index,'TCD']
-        print('TCD:', TCD)
+        target_measure = val_data.loc[index,'TCD']
+        print(measure+':', target_measure)
         
         targets = ptsFromGaussian(target_maps) * pix_len
         targets = targets[0]
         
-        TCD_calc = scipy.spatial.distance.euclidean(targets[0,:], targets[1,:]) 
-        print('TCD_calc:', TCD_calc)
+        measure_calc = scipy.spatial.distance.euclidean(targets[0,:], targets[1,:]) 
+        print(measure+'_calc:', measure_calc)
         
-        factor = TCD/ TCD_calc
+        factor = target_measure/ measure_calc
         print('factor:', factor)
 
         # find predictions
@@ -136,20 +142,23 @@ with torch.no_grad():
         outputs, out_maps = model(inputs)
         
         output_sfmax = torch.nn.functional.softmax(outputs,dim=1)
-        _, TCD_slice_pred = torch.max(output_sfmax[:,1],dim=0)
-        print('TCD_slice_pred:', TCD_slice_pred)
+        _, pred_slice = torch.max(output_sfmax[:,1],dim=0)
+        print(measure+'_slice_pred:', pred_slice)
 
-        TCD_slice_shift = abs(float(TCD_slice_pred) - float(TCD_slice))
-        print('TCD_slice_shift:', TCD_slice_shift)
+        slice_shift = abs(float(pred_slice) - float(target_slice))
+        print(measure+'_slice_shift:', slice_shift)
 
         preds = ptsFromGaussian(out_maps) * pix_len
-        presd_pos = preds[TCD_slice,:,:]
+        presd_pos = preds[target_slice,:,:]
 
-        TCD_pred = scipy.spatial.distance.euclidean(preds[0,0,:], preds[0,1,:]) * factor
-        print('TCD_pred:', TCD_pred)
+        pred_measure = scipy.spatial.distance.euclidean(presd_pos[0,:], presd_pos[1,:]) * factor
+        print(measure+'_pred:', pred_measure)
         print('------------------------------------\n')
         
-        d = {'index':index, 'TCD_slice':TCD_slice, 'TCD_slice_pred':TCD_slice_pred, 'slice_shift':TCD_slice_shift, 'targets':targets, 'preds':preds, 'preds pos slice:': presd_pos, 'TCD':TCD, 'TCD_pred':TCD_pred, 'TCD diff':TCD_pred-TCD}
+        d = {'index':index, measure+' slice':target_slice.item(), measure+' slice pred':pred_slice.item(), 'slice shift':slice_shift,
+         'targets':targets, 'preds': presd_pos, 'preds all slices':preds, 
+         measure:target_measure, measure+' pred':pred_measure,
+         measure+' diff':abs(pred_measure-target_measure), measure+' error':abs(pred_measure-target_measure)/target_measure}
         
         if i==0:
             df = pd.DataFrame([d])
@@ -158,10 +167,11 @@ with torch.no_grad():
         
         plt.figure()
         plt.ion()
-        plt.imshow(inputs[TCD_slice,0,:,:].cpu().numpy())
+        plt.imshow(inputs[target_slice,0,:,:].cpu().numpy(), cmap='Greys_r')
         plt.plot(targets[:,1]/pix_len, targets[:,0]/pix_len, color = 'blue')
         plt.plot(presd_pos[:,1]/pix_len, presd_pos[:,0]/pix_len, color = 'red')
-        plt.title('Targets = Blue, Predictions = Red')
+        plt.title(measure)
+        plt.legend(['Target', 'Prediction'])
         plt.ioff()
 
         # plt.show()
@@ -172,6 +182,11 @@ with torch.no_grad():
         plt.savefig(fig_dir+fig_name)
 
         i += 1 
+
+df = df.set_index('index')
+
+# add mean row
+df.loc['mean'] = df[['slice shift', measure+' diff', measure+' error']].mean()
 
 # save df
 df.to_excel(stats_file_dir)
