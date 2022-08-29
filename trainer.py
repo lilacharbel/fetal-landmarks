@@ -62,7 +62,7 @@ def exp_params_to_txt(batch_size, num_epochs, data, db_params, optimizer_params,
     param_file.close()
 
 
-def save_model(model, epoch, directory, metrics, val_data, batch_size, num_epochs, data, db_params, optimizer_params, filename=None):
+def save_model(model, epoch, directory, metrics, val_data, train_data, batch_size, num_epochs, data, db_params, optimizer_params, filename=None):
     """Save the state dict of the model in the directory,
     with the save name metrics at the given epoch.
     epoch: epoch number(<= 4 digits)
@@ -78,6 +78,7 @@ def save_model(model, epoch, directory, metrics, val_data, batch_size, num_epoch
         postfix = "_".join([f"{name}{val:0.4f}" for name, val in metrics.items()])
 
     valdata_name = os.path.join(directory, filename + postfix + "_val_data.xlsx")
+    traindata_name = os.path.join(directory, filename + postfix + "_train_data.xlsx")
     params_name = os.path.join(directory, filename + postfix + "_exp_params.txt")
     filename = os.path.join(directory, filename + postfix + ".statedict.pkl")
     
@@ -91,6 +92,8 @@ def save_model(model, epoch, directory, metrics, val_data, batch_size, num_epoch
 
     torch.save(state, filename)
     val_data.to_excel(valdata_name)
+    train_data.to_excel(traindata_name)
+
     exp_params_to_txt(batch_size, num_epochs, data, db_params, optimizer_params, params_name)
 
     print(f"Saved model at {filename}")
@@ -352,6 +355,8 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
+            running_selec_loss = 0.0
+            running_lm_loss = 0.0
             running_corrects = 0
             running_choose_acc = 0.0
             running_shift = 0.0
@@ -384,7 +389,7 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                     _, preds = torch.max(outputs, 1)
 
                     # normalization factor for landmarks loss
-                    a = (np.pi * data['sigma']**2) / (target_maps.size(2)*target_maps.size(3))
+                    a = (np.pi**2 * data['sigma']**2) / (target_maps.size(2)*target_maps.size(3))
                     selec_loss = criterion_cls(outputs, labels)
                     lm_loss = criterion_lm(output_maps[slice_idxs,:,:,:], target_maps) / a
 
@@ -402,6 +407,9 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
+                running_selec_loss += selec_loss.item() * inputs.size(0)
+                running_lm_loss += lm_loss.item() * inputs.size(0)
+
                 running_corrects += torch.sum(preds == labels.data)
 
                 nme_temp = compute_nme(output_maps[slice_idxs,:,:,:], target_maps)
@@ -418,6 +426,9 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                     #print(max_idx, max_val_idx, running_idx)
                     
             epoch_loss = running_loss / epoch_elem_size
+            epoch_selec_loss = running_selec_loss / epoch_elem_size
+            epoch_lm_loss = running_lm_loss / epoch_elem_size
+
             epoch_acc = running_corrects.double() / epoch_elem_size
             nme = nme_sum / nme_count
 
@@ -450,16 +461,22 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
                 _run.log_scalar('val_loss', float(epoch_loss))
                 _run.log_scalar('val_accuracy', float(epoch_acc))
                 _run.log_scalar('val_nme', float(nme))
+                _run.log_scalar('val_selec_loss', float(epoch_selec_loss))
+                _run.log_scalar('val_lm_loss', float(epoch_lm_loss))
             elif phase == 'val_train':
                 _run.log_scalar('vtrain_choose_acc', float(epoch_choose_acc))
                 _run.log_scalar('vtrain_choose_shift', float(epoch_choose_shift))
                 _run.log_scalar('vtrain_loss', float(epoch_loss))
                 _run.log_scalar('vtrain_accuracy', float(epoch_acc))
                 _run.log_scalar('vtrain_nme', float(nme))
+                _run.log_scalar('vtrain_selec_loss', float(epoch_selec_loss))
+                _run.log_scalar('vtrain_lm_loss', float(epoch_lm_loss))
             elif phase == 'train':
                 _run.log_scalar('train_loss', float(epoch_loss))
                 _run.log_scalar('train_accuracy', float(epoch_acc))
                 _run.log_scalar('train_nme', float(nme))
+                _run.log_scalar('train_selec_loss', float(epoch_selec_loss))
+                _run.log_scalar('train_lm_loss', float(epoch_lm_loss))
 
 
             # deep copy the model
@@ -478,20 +495,23 @@ def train_model(model, criterion_cls, criterion_lm, optimizer, scheduler, datalo
     print('Best val Acc: {:4f}'.format(best_acc))
     print('Best nme: {:4f}'.format(best_nme))
 
-    # save the validation set
+    # save the validation and train set
     val_idx = dataloaders['val'].dataset.indices
     val_data = data_table.iloc[val_idx]
 
+    train_idx = dataloaders['train'].dataset.indices
+    train_data = data_table.iloc[train_idx]
+
     # Save last epoch model
     # model_fname = save_model(model, epoch, run_dir, {'choose_acc' : epoch_choose_acc})
-    model_fname = save_model(model, epoch, run_dir, {'nme': nme}, val_data, batch_size, num_epochs, data, db_params, optimizer_params)
+    model_fname = save_model(model, epoch, run_dir, {'nme': nme}, val_data, train_data, batch_size, num_epochs, data, db_params, optimizer_params)
     _run.add_artifact(model_fname, "model_lastepoch")
 
     # load best model weights
     model.load_state_dict(best_model_wts)
     
     # model_fname = save_model(model, best_model_epoch, run_dir, {'choose_acc' : best_acc})
-    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme}, val_data, batch_size, num_epochs, data, db_params, optimizer_params)
+    model_fname = save_model(model, best_model_epoch, run_dir, {'nme': nme}, val_data, train_data, batch_size, num_epochs, data, db_params, optimizer_params)
     _run.add_artifact(model_fname, "model")
     return model
 
