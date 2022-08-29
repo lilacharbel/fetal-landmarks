@@ -22,8 +22,8 @@ measure = 'TCD'
 
 
 path_split = model_path.split('/')
-fig_dir = '/'.join(path_split[:-1])#+'/plots/'
-stats_file_dir = '/'.join(path_split[:-1])#+'/stats.xlsx'
+folder_dir = '/'.join(path_split[:-1])#+'/plots/'
+# stats_file_dir = '/'.join(path_split[:-1])#+'/stats.xlsx'
 
 # config
 batch_size = 6
@@ -90,7 +90,7 @@ def create_dataloaders(cuda, batch_size, db_params, data, csv):
 
     return loader, data, idx
 
-def measures(name, data, loader, idx):
+def measures(name, data, loader, idx, folder_dir):
     with torch.no_grad():
         model.eval()
 
@@ -161,9 +161,10 @@ def measures(name, data, loader, idx):
 
             # plt.show()
             
+            fig_dir = folder_dir+'/'+name+'_plots/'
             fig_name = '{}{}.png'.format(name, index)
             if not os.path.exists(fig_dir):
-                os.makedirs(fig_dir+'/'+name+'_plots/')
+                os.makedirs(fig_dir)
             plt.savefig(fig_dir+fig_name)
 
             i += 1 
@@ -174,11 +175,12 @@ def measures(name, data, loader, idx):
     df.loc['mean'] = df[['slice shift', measure+' diff', measure+' error']].mean()
 
     # save df
-    df.to_excel(stats_file_dir+'/'+name+'_stats.xlsx')
+    stats_file_dir = folder_dir+'/'+name+'_stats.xlsx'
+    df.to_excel(stats_file_dir)
 
     plt.figure()
     plt.ion()
-    sm.graphics.mean_diff_plot(df['TCD'], df['TCD_pred'])
+    sm.graphics.mean_diff_plot(df['TCD'], df['TCD pred'])
     plt.ioff()
     plt.savefig(fig_dir+'bland_altman.png')
 
@@ -210,8 +212,8 @@ train_loader, train_data, train_idx = create_dataloaders(cuda, batch_size, db_pa
 # train_idx = train_data.index
 
 # make measurements
-measures('val', val_data, val_loader, val_idx)
-measures('train', train_data, train_loader, train_idx)
+measures('val', val_data, val_loader, val_idx, folder_dir)
+measures('train', train_data, train_loader, train_idx, folder_dir)
 
 # all_data = pd.read_excel(db_params['csv'])
 # all_data = all_data.drop(['Unnamed: 0'], axis=1)
