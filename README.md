@@ -8,9 +8,7 @@ The project focuses on developing a semi-automatic method for extracting three l
 fetal brain from 3D MRI scans. The measurements of interest are the Trans Cerebellum Diameter (TCD), 
 Bone Biparietal Diameter (BBD), and Cerebral Biparietal Diameter (CBD). 
 
-<img src="figures/TCD.png" alt="TCD" title="TCD" height=250>
-<img src="figures/BBD.png" alt="BBD" title="BBD" height=250>
-<img src="figures/CBD.png" alt="CBD" title="CBD" height=250>
+<img src="figures/TCD.png" alt="TCD" title="TCD" height=250> <img src="figures/BBD.png" alt="BBD" title="BBD" height=250> <img src="figures/CBD.png" alt="CBD" title="CBD" height=250>
 
 ## Project Details
 
